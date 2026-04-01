@@ -131,9 +131,10 @@ with st.sidebar:
     # 서버 상태 표시
     api_ok = _check_api() if API_URL else False
     if API_URL:
-        st.success("API 서버 연결됨 ✅") if api_ok else st.warning(
-            "API 미연결 — 직접 모드로 동작합니다."
-        )
+        if api_ok:
+            st.success("API 서버 연결됨 ✅")
+        else:
+            st.warning("API 미연결 — 직접 모드로 동작합니다.")
     else:
         st.info("직접 모드 (API 서버 없음)")
 
