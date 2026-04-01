@@ -59,3 +59,12 @@ for case in cases:
     print(f"  → 신뢰도: {data['result']['confidence']*100:.1f}%")
     print(f"  → 요약:   {data['summary']}")
     print(f"  → 가이드 첫줄: {data['result']['guide'][0]}")
+
+# ── 4. /env 엔드포인트 테스트 ──────────────────────
+res = requests.get(f"{BASE_URL}/env")
+print_response("GET /env", res)
+
+# ── 5. /guide/{cluster_label} 테스트 ───────────────
+for label in ["호흡기 알레르기형", "비염+천식 복합형", "아토픽 마치형", "없는유형"]:
+    res = requests.get(f"{BASE_URL}/guide/{label}")
+    print_response(f"GET /guide/{label}", res)

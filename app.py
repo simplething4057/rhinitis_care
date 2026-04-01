@@ -526,7 +526,12 @@ with tab4:
                     w1, w2, w3 = st.columns(3)
                     w1.metric("🌡 기온",   f"{temp} °C")
                     w2.metric("💧 습도",   f"{humid} %")
-                    w3.metric("🌧 강수량", f"{precip} mm" if precip not in ("-", None) else "없음")
+                    try:
+                        precip_f = float(precip)
+                        precip_label = "없음" if precip_f == 0 else f"{precip_f:.1f} mm"
+                    except (TypeError, ValueError):
+                        precip_label = "없음"
+                    w3.metric("🌧 강수량", precip_label)
 
                     # 습도 비염 주의
                     try:
@@ -540,13 +545,21 @@ with tab4:
                     # 오늘 기온 시계열
                     today_df = wx_df.dropna(subset=["temperature"]).copy()
                     if not today_df.empty:
-                        today_df["시각"] = today_df["date"].astype(str) + " " + today_df["time"].astype(str)
-                        fig_wx = px.line(
-                            today_df.head(24), x="시각", y="temperature",
-                            title=f"{selected} 기온 예보",
-                            labels={"temperature": "기온 (°C)"},
+                        # "YYYYMMDD" + "HHMM" → datetime → "MM/DD HH시" 레이블
+                        today_df["_dt"] = pd.to_datetime(
+                            today_df["date"].astype(str) + today_df["time"].astype(str).str.zfill(4),
+                            format="%Y%m%d%H%M",
+                            errors="coerce",
                         )
-                        fig_wx.update_layout(height=280, margin=dict(t=50, b=10))
+                        today_df["시각"] = today_df["_dt"].dt.strftime("%m/%d %H시")
+                        plot_df = today_df.dropna(subset=["_dt"]).head(24)
+                        fig_wx = px.line(
+                            plot_df, x="시각", y="temperature",
+                            title=f"{selected} 기온 예보",
+                            labels={"temperature": "기온 (°C)", "시각": ""},
+                        )
+                        fig_wx.update_xaxes(tickangle=-45)
+                        fig_wx.update_layout(height=300, margin=dict(t=50, b=60))
                         st.plotly_chart(fig_wx, use_container_width=True)
 
                 except Exception as e:
