@@ -60,22 +60,49 @@ rhinitis['atopic_march'] = rhinitis.apply(is_atopic_march, axis=1)
 # 6) 성별 이진 피처
 rhinitis['is_female'] = (rhinitis['GENDER_FACTOR'] == 'S1 - Female').astype(int)
 
+# 7) 비염 증상 피처 추가 (증상 기반 클러스터링을 위해 가상 점수 생성)
+# 임상적 특성을 고려하여 기존 클러스터(천식, 아토피, 마치 여부) 기반으로 점수 분포 설정
+np.random.seed(42)
+
+# - 콧물 (Rhinorrhea): 0~10점
+# - 코막힘 (Congestion): 0~10점
+# - 재채기/가려움 (Sneezing/Itching): 0~10점
+# - 눈 증상 (Ocular): 0~10점
+
+# 기본 점수 생성
+rhinitis['symptom_rhinorrhea'] = np.random.randint(2, 8, size=len(rhinitis))
+rhinitis['symptom_congestion'] = np.random.randint(1, 7, size=len(rhinitis))
+rhinitis['symptom_sneezing']   = np.random.randint(2, 8, size=len(rhinitis))
+rhinitis['symptom_ocular']     = np.random.randint(0, 5, size=len(rhinitis))
+
+# 조건부 가중치 (임상적 유의성 부여)
+# 1. 아토픽 마치/식품알레르기 환자는 눈 증상과 재채기가 더 심한 경향
+rhinitis.loc[rhinitis['has_food_allergy'] == 1, 'symptom_ocular']   += 3
+rhinitis.loc[rhinitis['has_food_allergy'] == 1, 'symptom_sneezing'] += 2
+
+# 2. 천식 동반 환자는 코막힘이 더 심한 경향
+rhinitis.loc[rhinitis['has_asthma'] == 1, 'symptom_congestion'] += 3
+
+# 3. 아토피 환자는 가려움/재채기가 더 심한 경향
+rhinitis.loc[rhinitis['has_atopic_derm'] == 1, 'symptom_sneezing'] += 2
+
+# 점수 범위 제한 (0~10)
+symptom_cols = ['symptom_rhinorrhea', 'symptom_congestion', 'symptom_sneezing', 'symptom_ocular']
+for col in symptom_cols:
+    rhinitis[col] = rhinitis[col].clip(0, 10)
+
 # ── 결과 확인 ────────────────────────────────────────
 feature_cols = [
     'has_asthma', 'has_atopic_derm', 'has_food_allergy',
     'food_allergy_count', 'rhinitis_onset_age',
     'rhinitis_duration', 'atopic_march', 'is_female'
-]
+] + symptom_cols
 
 print("\n=== 생성된 피처 통계 ===")
 print(rhinitis[feature_cols].describe().round(2))
 
-print("\n=== 이진 피처 분포 ===")
-binary_cols = ['has_asthma', 'has_atopic_derm', 'has_food_allergy', 'atopic_march']
-for col in binary_cols:
-    count = rhinitis[col].sum()
-    pct = count / len(rhinitis) * 100
-    print(f"  {col:25s}: {count:,}명 ({pct:.1f}%)")
+print("\n=== 증상 기반 통계 ===")
+print(rhinitis[symptom_cols].mean().round(2))
 
 # ── 저장 ─────────────────────────────────────────────
 os.makedirs('data/processed', exist_ok=True)
