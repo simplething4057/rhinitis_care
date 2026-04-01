@@ -169,17 +169,6 @@ with st.sidebar:
     st.markdown("## 🌿 비염 케어 AI")
     st.divider()
 
-    # 서버 상태 표시
-    api_ok = _check_api() if API_URL else False
-    if API_URL:
-        if api_ok:
-            st.success("API 서버 연결됨 ✅")
-        else:
-            st.warning("API 미연결 — 직접 모드로 동작합니다.")
-    else:
-        st.info("직접 모드 (API 서버 없음)")
-
-    st.divider()
     st.markdown("### 📋 정보 입력")
 
     has_asthma       = st.selectbox("천식 보유 여부",     ["없음", "있음"])
