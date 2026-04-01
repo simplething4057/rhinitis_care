@@ -75,9 +75,36 @@
 
 ---
 
+### Phase 8. 클러스터링 일반화 성능 검증 ✅ (`step5_validation.py`)
+
+세 가지 방법으로 비지도 학습 모델 신뢰성을 정량 검증:
+
+| 검증 방법 | 내용 | 합격 기준 |
+|---|---|---|
+| [A] 홀드아웃 분포 안정성 | 80/20 분리 후 클러스터 비율 드리프트 측정 | 최대 드리프트 < 10% |
+| [B] 다중 시드 Silhouette | 시드 10개 반복 학습 → 평균·표준편차 산출 | std < 0.02 |
+| [C] Bootstrap Jaccard | 부트스트랩 50회 반복 → 기준 모델과의 클러스터 멤버십 유사도 | 평균 ≥ 0.75 |
+
+- 검증 차트: `outputs/figures/step5_validation.png`
+
+### 코드-문서 불일치 해소 (2026-04-02)
+
+| 항목 | 수정 전 | 수정 후 |
+|---|---|---|
+| step3 N_CLUSTERS | 4 | **3** |
+| 클러스터 유형명 | 콧물·재채기 분비형 등 4종 | **호흡기 알레르기형·비염+천식 복합형·아토픽 마치형** (문서 일치) |
+| 모델 파일 경로 | predictor.py → kmeans_rhinitis.pkl (파일 없음) | **step3에서 두 경로 동시 저장** (kmeans_childhood.pkl + kmeans_rhinitis.pkl) |
+
+### 전처리 모듈 파이프라인 연결 (2026-04-02)
+
+- `step1_feature_engineering.py` — `src/data/preprocess.py`의 `handle_missing_values()` + `remove_outliers_iqr()` 직접 호출
+- `step3_clustering.py` — 동일 preprocess 함수로 연속형 피처 재처리
+
+---
+
 ## 다음 단계
 
-### Phase 8. 배포 (Streamlit Cloud)
+### Phase 9. 배포 (Streamlit Cloud)
 - [ ] 모델 파일 git 포함 전략 결정 (`.gitignore` 수정 또는 외부 호스팅)
 - [ ] `.streamlit/secrets.toml` 형식으로 API 키 등록
 - [ ] `packages.txt` 필요 여부 확인

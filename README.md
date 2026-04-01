@@ -116,11 +116,19 @@ rhinitis_care/
 ```
 데이터 수집 (Kaggle 코호트 / 공공 API)
     ↓
-피처 엔지니어링 (step1_feature_engineering.py)
+피처 엔지니어링 + 전처리 (step1_feature_engineering.py)
+  └─ src/data/preprocess.py: handle_missing_values, remove_outliers_iqr 연결
     ↓
 최적 클러스터 수 탐색 (step2_find_optimal_k.py)
     ↓
 K-Means 클러스터링 확정 (step3_clustering.py, k=3)
+  └─ src/data/preprocess.py: 연속형 피처 재처리 연결
+  └─ outputs/models/kmeans_rhinitis.pkl 생성 (predictor.py 참조용)
+    ↓
+클러스터링 일반화 성능 검증 (step5_validation.py)
+  ├─ [A] 홀드아웃 분포 안정성 (80/20 분리)
+  ├─ [B] 다중 시드 Silhouette 검증
+  └─ [C] Bootstrap Jaccard 안정성
     ↓
 FastAPI 추론 서버 (src/api/)
     ↓

@@ -1,12 +1,23 @@
 """
 Step 1. 피처 엔지니어링
 Childhood Allergies 데이터에서 클러스터링에 필요한 피처 생성 후 저장
+
+전처리 파이프라인 연결:
+  - src/data/preprocess.py 의 handle_missing_values(), remove_outliers_iqr() 사용
+  - 연속형 피처(rhinitis_onset_age, rhinitis_duration, food_allergy_count)에 대해
+    결측 보간 → IQR 이상치 클리핑 순서로 정제
 """
 
-import kagglehub
+import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import kagglehub
 import pandas as pd
 import numpy as np
+
+# ── preprocess 모듈 연결 ─────────────────────────────
+from src.data.preprocess import handle_missing_values, remove_outliers_iqr
 
 # ── 데이터 로드 ──────────────────────────────────────
 print("=" * 50)
@@ -37,14 +48,13 @@ food_cols = ['PEANUT_ALG_START', 'MILK_ALG_START',
 rhinitis['has_food_allergy'] = rhinitis[food_cols].notna().any(axis=1).astype(int)
 rhinitis['food_allergy_count'] = rhinitis[food_cols].notna().sum(axis=1)
 
-# 3) 비염 발병 나이 (결측은 중앙값으로 대체)
-median_onset = rhinitis['ALLERGIC_RHINITIS_START'].median()
-rhinitis['rhinitis_onset_age'] = rhinitis['ALLERGIC_RHINITIS_START'].fillna(median_onset)
+# 3) 비염 발병 나이 (초기값 — 이후 preprocess 모듈로 결측 보간)
+rhinitis['rhinitis_onset_age'] = rhinitis['ALLERGIC_RHINITIS_START']
 
-# 4) 비염 지속 기간 (END - START, 없으면 0)
+# 4) 비염 지속 기간 (END - START, 음수 방지 clip)
 rhinitis['rhinitis_duration'] = (
     rhinitis['ALLERGIC_RHINITIS_END'] - rhinitis['ALLERGIC_RHINITIS_START']
-).fillna(0).clip(lower=0)
+).clip(lower=0)
 
 # 5) 아토픽 마치 여부 (식품알레르기 → 아토피 → 비염 순서 진행)
 def is_atopic_march(row):
@@ -91,14 +101,25 @@ symptom_cols = ['symptom_rhinorrhea', 'symptom_congestion', 'symptom_sneezing', 
 for col in symptom_cols:
     rhinitis[col] = rhinitis[col].clip(0, 10)
 
-# ── 결과 확인 ────────────────────────────────────────
+# ── preprocess 파이프라인: 연속형 피처 결측 보간 + 이상치 클리핑 ──
 feature_cols = [
     'has_asthma', 'has_atopic_derm', 'has_food_allergy',
     'food_allergy_count', 'rhinitis_onset_age',
     'rhinitis_duration', 'atopic_march', 'is_female'
 ] + symptom_cols
 
-print("\n=== 생성된 피처 통계 ===")
+cont_cols = ['rhinitis_onset_age', 'rhinitis_duration', 'food_allergy_count']
+
+print("\npreprocess 모듈 연결 — 결측 보간(interpolate) 적용 중...")
+rhinitis_proc = handle_missing_values(rhinitis[feature_cols].copy(), strategy='interpolate')
+
+print("preprocess 모듈 연결 — IQR 이상치 클리핑 적용 중...")
+rhinitis_proc = remove_outliers_iqr(rhinitis_proc, cont_cols)
+
+# 처리된 값을 원본 DataFrame 에 반영
+rhinitis[feature_cols] = rhinitis_proc.values
+
+print("\n=== 생성된 피처 통계 (전처리 후) ===")
 print(rhinitis[feature_cols].describe().round(2))
 
 print("\n=== 증상 기반 통계 ===")
