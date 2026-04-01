@@ -14,6 +14,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Streamlit Cloud secrets → os.environ 브릿지
+# .env는 로컬, st.secrets는 Streamlit Cloud에서 API 키를 공급
+for _k in ("AIRKOREA_API_KEY", "KMA_API_KEY", "APP_ENV"):
+    if _k in st.secrets and not os.getenv(_k):
+        os.environ[_k] = st.secrets[_k]
+
 
 def _hex_rgba(hex_color: str, alpha: float = 0.27) -> str:
     """#RRGGBB → rgba(r,g,b,a)  plotly fillcolor 호환용."""
@@ -111,6 +117,33 @@ def run_predict(payload: dict) -> dict:
     return predictor.predict(payload)
 
 
+# ── PM10 등급 판정 ────────────────────────────────────
+def _pm10_grade(val: float) -> tuple[str, str]:
+    """(등급명, 색상) 반환."""
+    if val <= 30:   return "좋음",   "#4CAF50"
+    if val <= 80:   return "보통",   "#FFC107"
+    if val <= 150:  return "나쁨",   "#FF5722"
+    return "매우나쁨", "#B71C1C"
+
+def _pm25_grade(val: float) -> tuple[str, str]:
+    if val <= 15:   return "좋음",   "#4CAF50"
+    if val <= 35:   return "보통",   "#FFC107"
+    if val <= 75:   return "나쁨",   "#FF5722"
+    return "매우나쁨", "#B71C1C"
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_air(station: str):
+    from src.data.api_collector import fetch_airkorea
+    return fetch_airkorea(station_name=station)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_weather(nx: int, ny: int):
+    from src.data.api_collector import fetch_kma_forecast
+    return fetch_kma_forecast(nx=nx, ny=ny)
+
+
 def _get_guide_info(label: str) -> dict | None:
     """유형 안내 탭용 가이드. API → predictor 순서로 조회."""
     if API_URL:
@@ -180,7 +213,7 @@ with st.sidebar:
 st.markdown("# 🌿 비염 케어 AI")
 st.caption("동반 질환 정보를 입력하면 비염 유형을 분류하고 맞춤형 관리 가이드를 제공합니다.")
 
-tab1, tab2, tab3 = st.tabs(["🔍 유형 분석", "📊 클러스터 현황", "ℹ️ 유형 안내"])
+tab1, tab2, tab3, tab4 = st.tabs(["🔍 유형 분석", "📊 클러스터 현황", "ℹ️ 유형 안내", "🌍 환경 정보"])
 
 
 # ────────────────────────────────────────────────────
@@ -389,3 +422,143 @@ with tab3:
                 st.metric("전체 비율",    f"{stat['pct']}%")
                 st.metric("평균 발병 나이", f"{stat['onset']}세")
                 st.metric("천식 동반율",   f"{stat['asthma']}%")
+
+
+# ────────────────────────────────────────────────────
+# Tab 4: 환경 정보 (에어코리아 + 기상청)
+# ────────────────────────────────────────────────────
+STATIONS = {
+    "서울 종로구": ("종로구",  60, 127),
+    "서울 강남구": ("강남구",  61, 126),
+    "서울 마포구": ("마포구",  59, 127),
+    "인천":        ("인천",    55, 124),
+    "수원":        ("수원",    60, 121),
+    "대전":        ("대전",    67, 100),
+    "대구":        ("대구",    89,  90),
+    "부산":        ("부산",    98,  76),
+}
+
+with tab4:
+    has_air_key     = bool(os.getenv("AIRKOREA_API_KEY"))
+    has_weather_key = bool(os.getenv("KMA_API_KEY"))
+
+    if not has_air_key and not has_weather_key:
+        st.warning(
+            "API 키가 설정되지 않았습니다.  \n"
+            "Streamlit Cloud → 앱 설정 → Secrets 에서 "
+            "`AIRKOREA_API_KEY` 와 `KMA_API_KEY` 를 입력해주세요."
+        )
+    else:
+        selected = st.selectbox("📍 측정 지역", list(STATIONS.keys()))
+        station_name, nx, ny = STATIONS[selected]
+
+        # ── 에어코리아 ─────────────────────────────────
+        st.markdown("### 💨 대기 환경")
+
+        if not has_air_key:
+            st.caption("에어코리아 API 키 미설정 — 대기 정보를 불러올 수 없습니다.")
+        else:
+            with st.spinner("대기 정보 불러오는 중..."):
+                try:
+                    air_df = _fetch_air(station_name)
+                    latest = air_df.dropna(subset=["pm10"]).iloc[-1]
+
+                    pm10_val  = latest.get("pm10",  0) or 0
+                    pm25_val  = latest.get("pm25",  0) or 0
+                    o3_val    = latest.get("o3",    0) or 0
+                    pm10_grade, pm10_color = _pm10_grade(pm10_val)
+                    pm25_grade, pm25_color = _pm25_grade(pm25_val)
+
+                    # 비염 주의 알림
+                    if pm10_val > 80 or pm25_val > 35:
+                        st.error(
+                            f"⚠️ 현재 대기 상태가 **나쁨** 수준입니다. "
+                            "외출 시 KF80 이상 마스크를 착용하세요."
+                        )
+                    elif pm10_val > 30 or pm25_val > 15:
+                        st.warning("현재 대기 상태가 **보통** 수준입니다. 민감군은 주의하세요.")
+
+                    # 현재값 지표
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric(
+                        "PM10 (미세먼지)",
+                        f"{pm10_val:.0f} ㎍/㎥",
+                        delta=pm10_grade,
+                        delta_color="off",
+                    )
+                    c2.metric(
+                        "PM2.5 (초미세먼지)",
+                        f"{pm25_val:.0f} ㎍/㎥",
+                        delta=pm25_grade,
+                        delta_color="off",
+                    )
+                    c3.metric("O3 (오존)", f"{o3_val:.3f} ppm")
+
+                    # 24시간 PM10 추이
+                    chart_df = air_df.dropna(subset=["pm10"]).tail(24).copy()
+                    if not chart_df.empty:
+                        fig_air = px.line(
+                            chart_df, x="datetime", y="pm10",
+                            title=f"{station_name} PM10 최근 24시간 추이",
+                            labels={"datetime": "시각", "pm10": "PM10 (㎍/㎥)"},
+                        )
+                        fig_air.add_hline(y=30,  line_dash="dot", line_color="#4CAF50",
+                                          annotation_text="좋음 기준(30)")
+                        fig_air.add_hline(y=80,  line_dash="dot", line_color="#FFC107",
+                                          annotation_text="나쁨 기준(80)")
+                        fig_air.add_hline(y=150, line_dash="dot", line_color="#FF5722",
+                                          annotation_text="매우나쁨(150)")
+                        fig_air.update_layout(height=300, margin=dict(t=50, b=10))
+                        st.plotly_chart(fig_air, use_container_width=True)
+
+                    st.caption(f"마지막 업데이트: {latest.get('datetime', '-')}  |  캐시 TTL: 60분")
+
+                except Exception as e:
+                    st.error(f"대기 정보를 불러오지 못했습니다: {e}")
+
+        st.divider()
+
+        # ── 기상청 ─────────────────────────────────────
+        st.markdown("### 🌤 날씨 예보")
+
+        if not has_weather_key:
+            st.caption("기상청 API 키 미설정 — 날씨 정보를 불러올 수 없습니다.")
+        else:
+            with st.spinner("날씨 정보 불러오는 중..."):
+                try:
+                    wx_df = _fetch_weather(nx, ny)
+
+                    # 가장 가까운 예보 시각 값
+                    latest_wx = wx_df.dropna(subset=["temperature"]).iloc[0]
+                    temp  = latest_wx.get("temperature",  "-")
+                    humid = latest_wx.get("humidity",     "-")
+                    precip = latest_wx.get("precipitation", "-")
+
+                    w1, w2, w3 = st.columns(3)
+                    w1.metric("🌡 기온",   f"{temp} °C")
+                    w2.metric("💧 습도",   f"{humid} %")
+                    w3.metric("🌧 강수량", f"{precip} mm" if precip not in ("-", None) else "없음")
+
+                    # 습도 비염 주의
+                    try:
+                        if float(humid) >= 70:
+                            st.warning("습도가 높습니다. 실내 습도 조절과 환기를 권장합니다.")
+                        elif float(humid) <= 30:
+                            st.warning("습도가 낮습니다. 코 점막 건조에 주의하세요.")
+                    except (ValueError, TypeError):
+                        pass
+
+                    # 오늘 기온 시계열
+                    today_df = wx_df.dropna(subset=["temperature"]).copy()
+                    if not today_df.empty:
+                        today_df["시각"] = today_df["date"].astype(str) + " " + today_df["time"].astype(str)
+                        fig_wx = px.line(
+                            today_df.head(24), x="시각", y="temperature",
+                            title=f"{selected} 기온 예보",
+                            labels={"temperature": "기온 (°C)"},
+                        )
+                        fig_wx.update_layout(height=280, margin=dict(t=50, b=10))
+                        st.plotly_chart(fig_wx, use_container_width=True)
+
+                except Exception as e:
+                    st.error(f"날씨 정보를 불러오지 못했습니다: {e}")
