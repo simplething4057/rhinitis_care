@@ -14,6 +14,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _hex_rgba(hex_color: str, alpha: float = 0.27) -> str:
+    """#RRGGBB → rgba(r,g,b,a)  plotly fillcolor 호환용."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
 # ── 페이지 설정 ────────────────────────────────────────
 st.set_page_config(
     page_title="비염 케어 AI",
@@ -248,7 +256,7 @@ with tab1:
                 r=values + [values[0]],
                 theta=cats + [cats[0]],
                 fill="toself",
-                fillcolor=f"{color}44",
+                fillcolor=_hex_rgba(color, 0.27),
                 line=dict(color=color, width=2),
             ))
             fig_radar.update_layout(
