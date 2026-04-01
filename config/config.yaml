@@ -1,0 +1,84 @@
+# ============================================================
+# 비염 케어 AI 프로젝트 - 설정 파일
+# ============================================================
+
+project:
+  name: "rhinitis_care"
+  version: "0.1.0"
+  description: "AI 기반 비염 증상 예측 및 개인 맞춤형 케어 모델"
+
+# ---- 데이터 경로 ----
+paths:
+  raw_data:       "data/raw/"
+  processed_data: "data/processed/"
+  external_data:  "data/external/"
+  figures:        "outputs/figures/"
+  reports:        "outputs/reports/"
+  models:         "outputs/models/"
+
+# ---- 공공 API 키 (환경변수로 주입 권장) ----
+api:
+  airkorea_key:    "${AIRKOREA_API_KEY}"    # 에어코리아 대기오염 API
+  kma_key:         "${KMA_API_KEY}"         # 기상청 날씨/꽃가루 API
+
+# ---- 에어코리아 API ----
+airkorea:
+  base_url: "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc"
+  items:
+    - "pm10Value"    # 미세먼지 (PM10)
+    - "pm25Value"    # 초미세먼지 (PM2.5)
+    - "o3Value"      # 오존
+
+# ---- 기상청 API ----
+kma:
+  base_url: "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0"
+
+# ---- 증상 설정 ----
+symptoms:
+  vas_items:
+    - "nasal_discharge"   # 콧물
+    - "nasal_congestion"  # 코막힘
+    - "sneezing"          # 재채기
+    - "eye_itching"       # 눈 가려움
+  scale:
+    min: 0
+    max: 10
+
+# ---- K-Means 클러스터링 ----
+clustering:
+  n_clusters: 3
+  cluster_labels:
+    0: "콧물-재채기 우세형"
+    1: "코막힘 우세형"
+    2: "자극 민감형"
+  random_state: 42
+  max_iter: 300
+
+# ---- 모델 학습 ----
+model:
+  test_size: 0.2
+  random_state: 42
+  lgbm:
+    n_estimators: 200
+    learning_rate: 0.05
+    num_leaves: 31
+    max_depth: -1
+  lstm:
+    sequence_length: 7    # 7일 시퀀스
+    hidden_size: 64
+    num_layers: 2
+    dropout: 0.2
+    epochs: 50
+    batch_size: 32
+
+# ---- 환경 임계값 (증상 예보 기준) ----
+thresholds:
+  pm10:
+    good: 30
+    moderate: 80
+    bad: 150
+    very_bad: 150
+  pollen:
+    low: 10
+    moderate: 50
+    high: 100
