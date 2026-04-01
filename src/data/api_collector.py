@@ -99,7 +99,13 @@ def fetch_airkorea(station_name: str = "종로구", date_str: str | None = None)
         })
 
     df = pd.DataFrame(records)
-    df["datetime"] = pd.to_datetime(df["datetime"])
+    # 에어코리아는 자정을 "YYYY-MM-DD 24:00"으로 반환 → 다음날 00:00으로 변환
+    mask_24 = df["datetime"].str.contains("24:00", na=False)
+    df["datetime"] = pd.to_datetime(
+        df["datetime"].str.replace(" 24:00", " 00:00", regex=False),
+        format="%Y-%m-%d %H:%M",
+    )
+    df.loc[mask_24, "datetime"] += pd.Timedelta(days=1)
     df["date"] = df["datetime"].dt.date
     logger.info(f"에어코리아 수집 완료: {len(df)}건 (station={station_name})")
     _cache_set(cache_key, df)
