@@ -2,12 +2,18 @@
 공공데이터 API 수집 모듈
 - 에어코리아: 미세먼지(PM10, PM2.5) 실시간 수집
 - 기상청: 기온, 습도 수집
+
+캐싱 정책:
+  - 에어코리아: TTL 60분 (station_name 기준)
+  - 기상청:     TTL 60분 (nx, ny 격자 기준)
+  - clear_cache() 로 강제 초기화 가능
 """
 
 import os
+import time
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 import logging
 
@@ -16,6 +22,36 @@ logger = logging.getLogger(__name__)
 
 AIRKOREA_KEY = os.getenv("AIRKOREA_API_KEY", "")
 KMA_KEY = os.getenv("KMA_API_KEY", "")
+
+# ──────────────────────────────────────────────
+# 간단한 TTL 인메모리 캐시
+# ──────────────────────────────────────────────
+_CACHE_TTL_SEC = 3600  # 1시간
+
+_cache: dict[str, tuple[float, pd.DataFrame]] = {}  # key → (stored_at, df)
+
+
+def _cache_get(key: str) -> pd.DataFrame | None:
+    """캐시 히트 시 DataFrame 반환, 만료/미존재 시 None."""
+    if key not in _cache:
+        return None
+    stored_at, df = _cache[key]
+    if time.time() - stored_at > _CACHE_TTL_SEC:
+        del _cache[key]
+        return None
+    logger.debug(f"[cache HIT] {key}")
+    return df
+
+
+def _cache_set(key: str, df: pd.DataFrame) -> None:
+    _cache[key] = (time.time(), df)
+    logger.debug(f"[cache SET] {key}")
+
+
+def clear_cache() -> None:
+    """전체 캐시 초기화 (테스트·강제 갱신용)."""
+    _cache.clear()
+    logger.info("API 캐시 초기화 완료")
 
 
 # ──────────────────────────────────────────────
@@ -26,9 +62,16 @@ def fetch_airkorea(station_name: str = "종로구", date_str: str | None = None)
     에어코리아 시간대별 대기오염 데이터 수집.
     station_name: 측정소 이름 (예: '종로구', '강남구')
     date_str: 'YYYY-MM-DD' 형식. None이면 오늘.
+
+    결과는 TTL 60분 인메모리 캐시에 보관됩니다.
     """
     if not AIRKOREA_KEY:
         raise EnvironmentError("AIRKOREA_API_KEY 환경변수가 설정되지 않았습니다.")
+
+    cache_key = f"airkorea:{station_name}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     base_url = "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getMsrstnAcctoRltmMesureDnsty"
     params = {
@@ -59,6 +102,7 @@ def fetch_airkorea(station_name: str = "종로구", date_str: str | None = None)
     df["datetime"] = pd.to_datetime(df["datetime"])
     df["date"] = df["datetime"].dt.date
     logger.info(f"에어코리아 수집 완료: {len(df)}건 (station={station_name})")
+    _cache_set(cache_key, df)
     return df
 
 
@@ -69,9 +113,16 @@ def fetch_kma_forecast(nx: int = 60, ny: int = 127) -> pd.DataFrame:
     """
     기상청 단기예보 (기온, 습도) 수집.
     nx, ny: 격자 좌표 (서울 기본값)
+
+    결과는 TTL 60분 인메모리 캐시에 보관됩니다.
     """
     if not KMA_KEY:
         raise EnvironmentError("KMA_API_KEY 환경변수가 설정되지 않았습니다.")
+
+    cache_key = f"kma:{nx}:{ny}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     now = datetime.now()
     base_date = now.strftime("%Y%m%d")
@@ -106,6 +157,7 @@ def fetch_kma_forecast(nx: int = 60, ny: int = 127) -> pd.DataFrame:
 
     df = pd.DataFrame(list(records.values()))
     logger.info(f"기상청 예보 수집 완료: {len(df)}건")
+    _cache_set(cache_key, df)
     return df
 
 

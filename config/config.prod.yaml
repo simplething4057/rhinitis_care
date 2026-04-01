@@ -1,0 +1,17 @@
+# ============================================================
+# 운영(prod) 환경 오버라이드 설정
+# config.yaml의 값을 여기서 덮어씁니다.
+# 실제 도메인 주소로 변경 후 사용하세요.
+# ============================================================
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+  log_level: "warning"
+  cors_origins:
+    - "https://your-streamlit-app.streamlit.app"   # Streamlit Cloud 배포 URL로 교체
+    # - "https://your-custom-domain.com"           # 커스텀 도메인 사용 시 추가
+
+streamlit:
+  api_base_url: "https://your-api-domain.com"      # 운영 API 서버 URL로 교체

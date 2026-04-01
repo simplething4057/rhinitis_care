@@ -1,6 +1,6 @@
 # 비염 케어 AI — 진행 현황 기록
 
-> 마지막 업데이트: 2026-04-01
+> 마지막 업데이트: 2026-04-01 (Phase 7 완료)
 
 ---
 
@@ -60,20 +60,28 @@
 
 ---
 
+### Phase 6. FastAPI 백엔드 구축 ✅
+- `src/api/main.py` — POST /predict, GET /guide, GET /clusters, GET /health, GET /env
+- `src/api/schemas.py` — Pydantic 입력/출력 스키마
+- `src/api/predictor.py` — 모델 로드 + 유효성 검증 + 추론 파이프라인
+- `src/utils/config.py` — 환경별 설정 로더 (dev/prod 분리)
+- `src/utils/logging_config.py` — 중앙화된 로깅 (콘솔 + 로테이션 파일)
+
+### Phase 7. Streamlit 대시보드 ✅ (`app.py`)
+- 탭 1: 사이드바 입력 → 비염 유형 분류 → 신뢰도 게이지 + 레이더 + 맞춤 가이드
+- 탭 2: 클러스터 현황 (파이·바 차트, 통계 테이블)
+- 탭 3: 유형별 안내 (설명 + 가이드)
+- 동작 모드: API 서버 있으면 FastAPI 호출, 없으면 predictor 직접 호출
+
+---
+
 ## 다음 단계
 
-### Phase 6. FastAPI 백엔드 구축
-- `src/api/main.py` 생성
-- 엔드포인트: `POST /predict`, `GET /guide`, `GET /env`
-- 클러스터 모델 로딩 및 추론 파이프라인 연결
-
-### Phase 7. Streamlit 대시보드
-- `app.py` 생성
-- 증상/동반질환 입력 → 비염 유형 분류 → 맞춤 가이드 출력
-
-### Phase 8. 배포
-- Streamlit Cloud 무료 배포
-- GitHub 연동
+### Phase 8. 배포 (Streamlit Cloud)
+- [ ] 모델 파일 git 포함 전략 결정 (`.gitignore` 수정 또는 외부 호스팅)
+- [ ] `.streamlit/secrets.toml` 형식으로 API 키 등록
+- [ ] `packages.txt` 필요 여부 확인
+- [ ] GitHub 연동 및 Streamlit Cloud 앱 생성
 
 ---
 

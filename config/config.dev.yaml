@@ -1,0 +1,16 @@
+# ============================================================
+# 개발(dev) 환경 오버라이드 설정
+# config.yaml의 값을 여기서 덮어씁니다.
+# ============================================================
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+  reload: true
+  log_level: "debug"
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8501"   # Streamlit 기본 포트
+
+streamlit:
+  api_base_url: "http://127.0.0.1:8000"

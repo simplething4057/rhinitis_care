@@ -1,5 +1,6 @@
-# 환경변수 (API 키 보호)
+# 환경변수 및 시크릿 (API 키 보호)
 .env
+.streamlit/secrets.toml
 
 # Python
 __pycache__/
@@ -18,15 +19,15 @@ env/
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
-# 데이터 (원본 대용량 파일)
-data/raw/*.csv
-data/raw/*.xlsx
+# 데이터 (원본 대용량 파일) — 100MB 이하는 git 포함
+# data/raw/*.csv
+# data/raw/*.xlsx
 data/external/*.json
 
-# 학습된 모델 바이너리
-outputs/models/*.pkl
-outputs/models/*.pt
-outputs/models/*.bin
+# 학습된 모델 바이너리 — Streamlit Cloud 배포를 위해 git 포함
+# outputs/models/*.pkl
+# outputs/models/*.pt
+# outputs/models/*.bin
 
 # IDE
 .vscode/

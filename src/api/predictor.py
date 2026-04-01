@@ -74,12 +74,33 @@ class RhinitisPredictor:
         if not path.exists():
             logger.warning(f"모델 파일 없음: {MODEL_PATH}")
             return
+
         bundle = joblib.load(path)
+
+        # 번들 키 존재 여부 검증
+        required_keys = {"model", "scaler", "features", "label_map"}
+        missing = required_keys - bundle.keys()
+        if missing:
+            raise ValueError(f"모델 번들에 필수 키 누락: {missing}")
+
+        # 타입 검증
+        if not hasattr(bundle["model"], "predict"):
+            raise TypeError("bundle['model']이 predict 메서드를 가지지 않습니다.")
+        if not hasattr(bundle["scaler"], "transform"):
+            raise TypeError("bundle['scaler']이 transform 메서드를 가지지 않습니다.")
+        if not isinstance(bundle["features"], list) or not bundle["features"]:
+            raise TypeError("bundle['features']는 비어 있지 않은 list여야 합니다.")
+        if not isinstance(bundle["label_map"], dict):
+            raise TypeError("bundle['label_map']은 dict여야 합니다.")
+
         self.model     = bundle["model"]
         self.scaler    = bundle["scaler"]
         self.features  = bundle["features"]
         self.label_map = bundle["label_map"]
-        logger.info(f"모델 로드 완료: {MODEL_PATH}")
+        logger.info(
+            f"모델 로드 완료: {MODEL_PATH} "
+            f"(features={self.features}, labels={list(self.label_map.values())})"
+        )
 
     @property
     def is_loaded(self) -> bool:
