@@ -859,7 +859,7 @@ with tab4:
                         plot_df = tmp_df.head(24)
                         fig_wx = px.line(
                             plot_df, x="_dt", y="temperature",
-                            title=f"{selected} 기온 예보",
+                            title=f"{selected_station} 기온 예보",
                             labels={"temperature": "기온 (°C)", "_dt": "시각"},
                         )
                         fig_wx.update_layout(height=300, margin=dict(t=50, b=10))
