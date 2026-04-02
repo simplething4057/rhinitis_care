@@ -1,130 +1,210 @@
 """
-RhinitisPredictor 유닛 테스트
+RhinitisPredictor 유닛 테스트 (LightGBM 우선 / K-Means 폴백 구조 대응)
 """
 import pytest
+import numpy as np
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 
-class TestModelValidation:
-    """_load_model 유효성 검증 테스트"""
+# ── 공통 mock 헬퍼 ─────────────────────────────────────────────────
+def _make_lgbm_bundle(**overrides):
+    """LightGBM 번들 mock 반환."""
+    lgbm_model = MagicMock()
+    lgbm_model.predict.return_value = np.array([1])
+    lgbm_model.predict_proba.return_value = np.array([[0.15, 0.70, 0.15]])
 
-    def _make_bundle(self, **overrides):
-        """유효한 번들 기본값 반환."""
-        model = MagicMock()
-        model.predict.return_value = [1]
-        model.transform.return_value = [[0.1, 0.5, 0.8]]
-        scaler = MagicMock()
-        scaler.transform.return_value = [[0.0] * 7]
+    bundle = {
+        "model":     lgbm_model,
+        "features":  ["has_asthma", "has_atopic_derm", "has_food_allergy",
+                      "food_allergy_count", "rhinitis_onset_age",
+                      "rhinitis_duration", "atopic_march", "is_female"],
+        "label_map": {0: "호흡기 알레르기형", 1: "비염+천식 복합형", 2: "아토픽 마치형"},
+        "cv_acc": 1.0,
+        "cv_f1":  1.0,
+    }
+    bundle.update(overrides)
+    return bundle
 
-        bundle = {
-            "model":     model,
-            "scaler":    scaler,
-            "features":  ["has_asthma", "has_atopic_derm", "has_food_allergy",
-                          "food_allergy_count", "rhinitis_onset_age",
-                          "rhinitis_duration", "atopic_march"],
-            "label_map": {0: "아토픽 마치형", 1: "호흡기 알레르기형", 2: "비염+천식 복합형"},
-        }
-        bundle.update(overrides)
-        return bundle
 
-    def test_load_model_file_not_found(self):
+def _make_kmeans_bundle(**overrides):
+    """K-Means 번들 mock 반환."""
+    km_model = MagicMock()
+    km_model.predict.return_value = [0]
+    km_model.transform.return_value = [[0.1, 0.5, 0.8]]
+
+    scaler = MagicMock()
+    scaler.transform.return_value = [[0.0] * 8]
+
+    bundle = {
+        "model":     km_model,
+        "scaler":    scaler,
+        "features":  ["has_asthma", "has_atopic_derm", "has_food_allergy",
+                      "food_allergy_count", "rhinitis_onset_age",
+                      "rhinitis_duration", "atopic_march", "is_female"],
+        "label_map": {0: "호흡기 알레르기형", 1: "비염+천식 복합형", 2: "아토픽 마치형"},
+    }
+    bundle.update(overrides)
+    return bundle
+
+
+# ── 테스트: LightGBM 로딩 ─────────────────────────────────────────
+class TestLGBMLoading:
+
+    def test_lgbm_loaded_sets_model_type(self):
         from src.api.predictor import RhinitisPredictor
-        with patch("src.api.predictor.Path.exists", return_value=False):
-            p = RhinitisPredictor.__new__(RhinitisPredictor)
-            p.model = p.scaler = p.features = p.label_map = None
-            p._load_model()
-        assert p.model is None
-
-    def test_load_model_missing_key_raises(self):
-        from src.api.predictor import RhinitisPredictor
-        bundle = self._make_bundle()
-        del bundle["scaler"]
-
-        with patch("src.api.predictor.Path.exists", return_value=True), \
+        bundle = _make_lgbm_bundle()
+        with patch.object(Path, "exists", return_value=True), \
              patch("src.api.predictor.joblib.load", return_value=bundle):
-            p = RhinitisPredictor.__new__(RhinitisPredictor)
-            with pytest.raises(ValueError, match="필수 키 누락"):
-                p._load_model()
-
-    def test_load_model_invalid_model_type_raises(self):
-        from src.api.predictor import RhinitisPredictor
-        bundle = self._make_bundle(model="not_a_model")
-
-        with patch("src.api.predictor.Path.exists", return_value=True), \
-             patch("src.api.predictor.joblib.load", return_value=bundle):
-            p = RhinitisPredictor.__new__(RhinitisPredictor)
-            with pytest.raises(TypeError, match="predict"):
-                p._load_model()
-
-    def test_load_model_empty_features_raises(self):
-        from src.api.predictor import RhinitisPredictor
-        bundle = self._make_bundle(features=[])
-
-        with patch("src.api.predictor.Path.exists", return_value=True), \
-             patch("src.api.predictor.joblib.load", return_value=bundle):
-            p = RhinitisPredictor.__new__(RhinitisPredictor)
-            with pytest.raises(TypeError, match="features"):
-                p._load_model()
-
-    def test_load_model_invalid_label_map_raises(self):
-        from src.api.predictor import RhinitisPredictor
-        bundle = self._make_bundle(label_map=[0, 1, 2])  # list, not dict
-
-        with patch("src.api.predictor.Path.exists", return_value=True), \
-             patch("src.api.predictor.joblib.load", return_value=bundle):
-            p = RhinitisPredictor.__new__(RhinitisPredictor)
-            with pytest.raises(TypeError, match="label_map"):
-                p._load_model()
-
-    def test_load_model_valid_sets_is_loaded(self):
-        from src.api.predictor import RhinitisPredictor
-        bundle = self._make_bundle()
-
-        with patch("src.api.predictor.Path.exists", return_value=True), \
-             patch("src.api.predictor.joblib.load", return_value=bundle):
-            p = RhinitisPredictor.__new__(RhinitisPredictor)
-            p.model = p.scaler = p.features = p.label_map = None
-            p._load_model()
-
+            p = RhinitisPredictor()
+        assert p.model_type == "lightgbm"
         assert p.is_loaded is True
-        assert p.features == bundle["features"]
+
+    def test_lgbm_features_stored(self):
+        from src.api.predictor import RhinitisPredictor
+        bundle = _make_lgbm_bundle()
+        with patch.object(Path, "exists", return_value=True), \
+             patch("src.api.predictor.joblib.load", return_value=bundle):
+            p = RhinitisPredictor()
+        assert p._lgbm_features == bundle["features"]
+
+    def test_lgbm_broken_falls_back_to_kmeans(self):
+        """LightGBM 로드 실패 시 K-Means로 폴백."""
+        from src.api.predictor import RhinitisPredictor
+        call_count = {"n": 0}
+
+        def load_side(path):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return {"model": "broken"}   # 파손 번들
+            return _make_kmeans_bundle()
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch("src.api.predictor.joblib.load", side_effect=load_side):
+            p = RhinitisPredictor()
+
+        assert p.model_type == "kmeans"
+        assert p.is_loaded is True
 
 
+# ── 테스트: K-Means 로딩 ──────────────────────────────────────────
+class TestKMeansLoading:
+
+    def _exists_kmeans_only(self):
+        """LightGBM 없음, K-Means 있음을 흉내."""
+        call = {"n": 0}
+        def side(self_path):
+            call["n"] += 1
+            return call["n"] > 1
+        return side
+
+    def test_kmeans_missing_scaler_not_loaded(self):
+        from src.api.predictor import RhinitisPredictor
+        bundle = _make_kmeans_bundle()
+        del bundle["scaler"]
+        with patch.object(Path, "exists", self._exists_kmeans_only()), \
+             patch("src.api.predictor.joblib.load", return_value=bundle):
+            p = RhinitisPredictor()
+        assert p.is_loaded is False
+
+    def test_no_model_files_not_loaded(self):
+        from src.api.predictor import RhinitisPredictor
+        with patch.object(Path, "exists", return_value=False):
+            p = RhinitisPredictor()
+        assert p.is_loaded is False
+        assert p.model_type is None
+
+
+# ── 테스트: predict() 출력 구조 ───────────────────────────────────
 class TestPredictOutput:
-    """predict() 출력 구조 테스트 (실제 모델 파일 필요)"""
 
-    MODEL_PATH = Path("outputs/models/kmeans_childhood.pkl")
+    SAMPLE = {
+        "has_asthma": 0, "has_atopic_derm": 0,
+        "has_food_allergy": 0, "food_allergy_count": 0,
+        "rhinitis_onset_age": 8.0, "rhinitis_duration": 2.0,
+        "atopic_march": 0, "is_female": 0,
+    }
 
     @pytest.fixture
-    def real_predictor(self):
-        if not self.MODEL_PATH.exists():
+    def lgbm_pred(self):
+        from src.api.predictor import RhinitisPredictor
+        with patch.object(Path, "exists", return_value=True), \
+             patch("src.api.predictor.joblib.load", return_value=_make_lgbm_bundle()):
+            return RhinitisPredictor()
+
+    @pytest.fixture
+    def kmeans_pred(self):
+        from src.api.predictor import RhinitisPredictor
+        call = {"n": 0}
+        def exists_side(self_path):
+            call["n"] += 1
+            return call["n"] > 1
+        with patch.object(Path, "exists", exists_side), \
+             patch("src.api.predictor.joblib.load", return_value=_make_kmeans_bundle()):
+            return RhinitisPredictor()
+
+    def test_lgbm_required_keys(self, lgbm_pred):
+        result = lgbm_pred.predict(self.SAMPLE)
+        for key in ("cluster_id", "cluster_label", "confidence",
+                    "cluster_probs", "description", "guide", "model_type"):
+            assert key in result
+
+    def test_lgbm_model_type_value(self, lgbm_pred):
+        assert lgbm_pred.predict(self.SAMPLE)["model_type"] == "lightgbm"
+
+    def test_lgbm_confidence_range(self, lgbm_pred):
+        conf = lgbm_pred.predict(self.SAMPLE)["confidence"]
+        assert 0.0 <= conf <= 1.0
+
+    def test_lgbm_cluster_probs_sum(self, lgbm_pred):
+        probs = lgbm_pred.predict(self.SAMPLE)["cluster_probs"]
+        assert abs(sum(probs.values()) - 1.0) < 1e-4
+
+    def test_lgbm_guide_non_empty(self, lgbm_pred):
+        guide = lgbm_pred.predict(self.SAMPLE)["guide"]
+        assert isinstance(guide, list) and len(guide) > 0
+
+    def test_kmeans_model_type_value(self, kmeans_pred):
+        assert kmeans_pred.predict(self.SAMPLE)["model_type"] == "kmeans"
+
+    def test_kmeans_confidence_range(self, kmeans_pred):
+        conf = kmeans_pred.predict(self.SAMPLE)["confidence"]
+        assert 0.0 <= conf <= 1.0
+
+    def test_not_loaded_raises(self):
+        from src.api.predictor import RhinitisPredictor
+        with patch.object(Path, "exists", return_value=False):
+            p = RhinitisPredictor()
+        with pytest.raises(RuntimeError, match="로드"):
+            p.predict(self.SAMPLE)
+
+
+# ── 테스트: 실제 모델 파일 (CI skip) ──────────────────────────────
+class TestRealModel:
+
+    LGBM_PATH   = Path("outputs/models/lgbm_rhinitis.pkl")
+    KMEANS_PATH = Path("outputs/models/kmeans_rhinitis.pkl")
+
+    @pytest.fixture
+    def real_pred(self):
+        if not (self.LGBM_PATH.exists() or self.KMEANS_PATH.exists()):
             pytest.skip("모델 파일 없음 — CI 환경에서는 건너뜁니다.")
         from src.api.predictor import RhinitisPredictor
         return RhinitisPredictor()
 
-    def test_predict_returns_required_keys(self, real_predictor):
-        result = real_predictor.predict({
-            "has_asthma": 0, "has_atopic_derm": 0,
+    def test_valid_label(self, real_pred):
+        result = real_pred.predict({
+            "has_asthma": 1, "has_atopic_derm": 0,
             "has_food_allergy": 0, "food_allergy_count": 0,
-            "rhinitis_onset_age": 8.0, "rhinitis_duration": 2.0,
-            "atopic_march": 0,
+            "rhinitis_onset_age": 7.0, "rhinitis_duration": 3.0,
+            "atopic_march": 0, "is_female": 0,
         })
-        for key in ("cluster_id", "cluster_label", "confidence", "description", "guide"):
-            assert key in result
+        valid = {"호흡기 알레르기형", "비염+천식 복합형", "아토픽 마치형"}
+        assert result["cluster_label"] in valid
 
-    def test_predict_confidence_range(self, real_predictor):
-        result = real_predictor.predict({
-            "has_asthma": 1, "has_atopic_derm": 1,
-            "has_food_allergy": 1, "food_allergy_count": 2,
-            "rhinitis_onset_age": 5.0, "rhinitis_duration": 4.0,
-            "atopic_march": 1,
-        })
-        assert 0.0 <= result["confidence"] <= 1.0
+    def test_model_type_set(self, real_pred):
+        assert real_pred.model_type in ("lightgbm", "kmeans")
 
-    def test_predict_not_loaded_raises(self):
-        from src.api.predictor import RhinitisPredictor
-        p = RhinitisPredictor.__new__(RhinitisPredictor)
-        p.model = None
-        with pytest.raises(RuntimeError, match="로드"):
-            p.predict({})
+    def test_lgbm_preferred_when_exists(self, real_pred):
+        if self.LGBM_PATH.exists():
+            assert real_pred.model_type == "lightgbm"
