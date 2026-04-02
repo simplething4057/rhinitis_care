@@ -334,9 +334,6 @@ with st.sidebar:
         st.caption("🟢 DB 연결됨")
     else:
         st.caption("🔴 DB 미연결 (이력 저장 불가)")
-    # 임시 디버그: 실제 로드된 DATABASE_URL 앞 40자 확인
-    _dburl = os.getenv("DATABASE_URL", "")
-    st.caption(f"🔍 DB URL: `{_dburl[:40]}...`")
     st.divider()
 
     st.markdown("### 📋 현재 증상 (0~10점)")
@@ -423,10 +420,10 @@ with tab1:
                 "symptom_congestion": s_congestion,
                 "symptom_sneezing": s_sneezing,
                 "symptom_ocular": s_ocular,
-                "pm10": env_now.get("pm10", 0),
-                "pm25": env_now.get("pm25", 0),
-                "humidity": env_now.get("humidity", 50),
-                "temperature": env_now.get("temperature", 20)
+                "pm10": float(env_now.get("pm10") or 0),
+                "pm25": float(env_now.get("pm25") or 0),
+                "humidity": float(env_now.get("humidity") or 50),
+                "temperature": float(env_now.get("temperature") or 20),
             }
             try:
                 save_history(record, user_nickname)
