@@ -20,7 +20,7 @@ for _k in ("AIRKOREA_API_KEY", "KMA_API_KEY", "APP_ENV", "DATABASE_URL"):
         os.environ[_k] = st.secrets[_k]
 
 # DB 의존 모듈은 환경변수 설정 후 임포트
-from src.utils.history import save_history, get_recent_history, generate_synthetic_history
+from src.utils.history import save_history, get_recent_history, generate_synthetic_history, get_cluster_avg_history
 
 
 def _hex_rgba(hex_color: str, alpha: float = 0.27) -> str:
@@ -572,25 +572,89 @@ with tab1:
         # ── Row Ex: 최근 7일 증상 점수 변화 ──────────────────
         st.markdown("#### 📈 최근 7일 증상 점수 추이")
         if not recent_df.empty:
-            # 점수 데이터 리쉐이핑 (Plotly용)
+            _sym_cols  = ["symptom_rhinorrhea", "symptom_congestion", "symptom_sneezing", "symptom_ocular"]
+            _sym_names = ["콧물", "코막힘", "재채기", "눈 증상"]
+            _sym_colors = {
+                "콧물":   "#4A90D9",
+                "코막힘": "#E8784A",
+                "재채기": "#2ECC71",
+                "눈 증상":"#7B68EE",
+            }
+
+            # ① 내 증상 라인 (실선 + 마커)
             score_df = recent_df.melt(
                 id_vars=["timestamp"],
-                value_vars=["symptom_rhinorrhea", "symptom_congestion", "symptom_sneezing", "symptom_ocular"],
+                value_vars=_sym_cols,
                 var_name="증상", value_name="점수"
             )
-            score_df["증상"] = score_df["증상"].map({
-                "symptom_rhinorrhea": "콧물",
-                "symptom_congestion": "코막힘",
-                "symptom_sneezing": "재채기",
-                "symptom_ocular": "눈 증상"
-            })
-            
+            score_df["증상"] = score_df["증상"].map(dict(zip(_sym_cols, _sym_names)))
+
             fig_scores = px.line(
                 score_df, x="timestamp", y="점수", color="증상",
                 markers=True,
-                color_discrete_map={"콧물": "#4A90D9", "코막힘": "#E8784A", "재채기": "#2ECC71", "눈 증상": "#7B68EE"}
+                color_discrete_map=_sym_colors,
             )
-            fig_scores.update_layout(height=300, margin=dict(t=10, b=10), yaxis_range=[0, 10])
+            # legendgroup 설정 — 나중에 추가할 평균 트레이스와 묶음 처리
+            for trace in fig_scores.data:
+                trace.legendgroup      = trace.name
+                trace.legendgrouptitle = dict(text="")
+
+            # ② 동일 유형 평균 라인 (점선, 마커 없음)
+            # DB에 같은 cluster_label 기록이 있으면 날짜별 평균, 없으면 CLUSTER_STATS 정적값 사용
+            avg_df = get_cluster_avg_history(label, days=7)
+
+            if not avg_df.empty:
+                # DB 기반 날짜별 평균
+                avg_melt = avg_df.melt(
+                    id_vars=["date"],
+                    value_vars=_sym_cols,
+                    var_name="증상", value_name="점수"
+                )
+                avg_melt["증상"] = avg_melt["증상"].map(dict(zip(_sym_cols, _sym_names)))
+                for sym in _sym_names:
+                    sub = avg_melt[avg_melt["증상"] == sym]
+                    fig_scores.add_trace(go.Scatter(
+                        x=sub["date"], y=sub["점수"],
+                        mode="lines",
+                        line=dict(color=_sym_colors[sym], dash="dot", width=1.5),
+                        opacity=0.55,
+                        name=f"{sym} (유형 평균)",
+                        legendgroup=sym,
+                        showlegend=True,
+                    ))
+            else:
+                # DB 데이터 부족 → CLUSTER_STATS 정적 프로파일을 수평 기준선으로 표시
+                profile = stat.get("symptom_profile", {})
+                prof_map = {"콧물": "symptom_rhinorrhea", "코막힘": "symptom_congestion",
+                            "재채기": "symptom_sneezing",  "눈 증상": "symptom_ocular"}
+                ts_range = recent_df["timestamp"].tolist()
+                for sym, col in prof_map.items():
+                    avg_val = profile.get(sym)
+                    if avg_val is None:
+                        continue
+                    fig_scores.add_trace(go.Scatter(
+                        x=[ts_range[0], ts_range[-1]],
+                        y=[avg_val, avg_val],
+                        mode="lines",
+                        line=dict(color=_sym_colors[sym], dash="dot", width=1.5),
+                        opacity=0.50,
+                        name=f"{sym} (유형 평균)",
+                        legendgroup=sym,
+                        showlegend=True,
+                    ))
+
+            fig_scores.update_layout(
+                height=320,
+                margin=dict(t=10, b=10),
+                yaxis_range=[0, 10],
+                legend=dict(
+                    groupclick="toggleitem",
+                    orientation="h",
+                    y=-0.25,
+                    font=dict(size=11),
+                ),
+            )
+            st.caption(f"실선: 내 증상  /  점선: {label} 평균")
             st.plotly_chart(fig_scores, use_container_width=True)
 
             # 💡 인사이트 제공

@@ -78,6 +78,55 @@ def get_recent_history(user_id: str, days=7):
     finally:
         db.close()
 
+def get_cluster_avg_history(cluster_label: str, days: int = 7) -> pd.DataFrame:
+    """동일 유형(cluster_label) 전체 대상자의 날짜별 평균 증상 점수 반환.
+    DB 연결이 없거나 해당 유형 데이터가 없으면 빈 DataFrame 반환.
+    """
+    if SessionLocal is None:
+        return pd.DataFrame()
+
+    db: Session = SessionLocal()
+    try:
+        threshold = datetime.now() - timedelta(days=days)
+        # 구 명칭 호환 매핑 (이전 DB 레코드 포함)
+        _label_compat = {
+            "호흡기 알레르기형":  ["호흡기 알레르기형", "콧물·재채기 우세형"],
+            "비염+천식 복합형":   ["비염+천식 복합형",  "코막힘 우세형"],
+            "아토픽 마치형":      ["아토픽 마치형",     "복합 과민형"],
+        }
+        labels = _label_compat.get(cluster_label, [cluster_label])
+
+        results = db.query(PredictionHistory).filter(
+            PredictionHistory.cluster_label.in_(labels),
+            PredictionHistory.created_at >= threshold
+        ).order_by(PredictionHistory.created_at.asc()).all()
+
+        if not results:
+            return pd.DataFrame()
+
+        data_list = [{
+            "date": r.created_at.date(),
+            "symptom_rhinorrhea": r.symptom_rhinorrhea,
+            "symptom_congestion": r.symptom_congestion,
+            "symptom_sneezing":   r.symptom_sneezing,
+            "symptom_ocular":     r.symptom_ocular,
+        } for r in results]
+
+        df = pd.DataFrame(data_list)
+        # 날짜별 평균 집계
+        avg_df = df.groupby("date")[
+            ["symptom_rhinorrhea", "symptom_congestion", "symptom_sneezing", "symptom_ocular"]
+        ].mean().reset_index()
+        avg_df["date"] = pd.to_datetime(avg_df["date"])
+        return avg_df
+
+    except Exception as e:
+        print(f"동일 유형 평균 조회 중 오류: {e}")
+        return pd.DataFrame()
+    finally:
+        db.close()
+
+
 def generate_synthetic_history(user_id: str):
     """최초 실행 시 가상 데이터 생성 (SQLAlchemy 저장)"""
     if SessionLocal is None:
