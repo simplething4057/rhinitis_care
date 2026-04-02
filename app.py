@@ -563,15 +563,28 @@ with tab4:
         else:
             with st.spinner("날씨 정보 불러오는 중..."):
                 try:
+                    import math
                     wx_df = _fetch_weather(nx, ny)
-                    latest_wx = wx_df.dropna(subset=["temperature"]).iloc[0]
+                    # 시간순 정렬 후 현재 시각과 가장 가까운 예보 행 선택
+                    tmp_df = wx_df.dropna(subset=["temperature"]).copy()
+                    tmp_df["_dt"] = pd.to_datetime(
+                        tmp_df["date"].astype(str) + tmp_df["time"].astype(str).str.zfill(4),
+                        format="%Y%m%d%H%M", errors="coerce",
+                    )
+                    tmp_df = tmp_df.dropna(subset=["_dt"]).sort_values("_dt").reset_index(drop=True)
+                    now_ts = pd.Timestamp.now()
+                    future = tmp_df[tmp_df["_dt"] >= now_ts]
+                    latest_wx = (future.iloc[0] if not future.empty else tmp_df.iloc[-1])
                     temp   = latest_wx.get("temperature",  "-")
                     humid  = latest_wx.get("humidity",     "-")
                     precip = latest_wx.get("precipitation", "-")
 
                     try:
-                        precip_f     = float(precip)
-                        precip_label = "없음" if precip_f == 0 else f"{precip_f:.1f} mm"
+                        precip_f = float(precip)
+                        if math.isnan(precip_f) or precip_f == 0:
+                            precip_label = "없음"
+                        else:
+                            precip_label = f"{precip_f:.1f} mm"
                     except (TypeError, ValueError):
                         precip_label = "없음"
 
@@ -588,14 +601,8 @@ with tab4:
                     except (ValueError, TypeError):
                         pass
 
-                    today_df = wx_df.dropna(subset=["temperature"]).copy()
-                    if not today_df.empty:
-                        today_df["_dt"] = pd.to_datetime(
-                            today_df["date"].astype(str) + today_df["time"].astype(str).str.zfill(4),
-                            format="%Y%m%d%H%M",
-                            errors="coerce",
-                        )
-                        plot_df = today_df.dropna(subset=["_dt"]).head(24)
+                    if not tmp_df.empty:
+                        plot_df = tmp_df.head(24)
                         fig_wx = px.line(
                             plot_df, x="_dt", y="temperature",
                             title=f"{selected} 기온 예보",
