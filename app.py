@@ -65,22 +65,22 @@ STATIONS = {
     "부산":          ("부산",    98,  76),
 }
 
-# ── 클러스터 메타 (증상 기반 3유형) ───────────────────
+# ── 클러스터 메타 (동반질환 기반 3유형 — step3/predictor.py 일치) ──
 CLUSTER_STATS = {
-    "콧물·재채기 우세형": {
-        "emoji": "💧", "pct": 40.0, "color": "#4A90D9",
-        "desc_short": "콧물·재채기 중심 알레르기 비염",
-        "symptom_profile": {"콧물": 8, "코막힘": 4, "재채기": 8, "눈 증상": 5},
+    "호흡기 알레르기형": {
+        "emoji": "🌿", "pct": 47.0, "color": "#4A90D9",
+        "desc_short": "동반 질환 없는 순수 비염 (천식·식품알레르기 0%)",
+        "symptom_profile": {"콧물": 8, "코막힘": 3, "재채기": 8, "눈 증상": 5},
     },
-    "코막힘 우세형": {
-        "emoji": "👃", "pct": 33.0, "color": "#E8784A",
-        "desc_short": "코막힘 중심 만성 비염",
-        "symptom_profile": {"콧물": 3, "코막힘": 9, "재채기": 3, "눈 증상": 3},
+    "비염+천식 복합형": {
+        "emoji": "💨", "pct": 40.0, "color": "#E8784A",
+        "desc_short": "천식 100% 동반 — 호흡기 집중 관리 필요",
+        "symptom_profile": {"콧물": 5, "코막힘": 9, "재채기": 5, "눈 증상": 3},
     },
-    "복합 과민형": {
-        "emoji": "👁", "pct": 27.0, "color": "#7B68EE",
-        "desc_short": "눈·코 복합 과민 반응형",
-        "symptom_profile": {"콧물": 6, "코막힘": 6, "재채기": 6, "눈 증상": 8},
+    "아토픽 마치형": {
+        "emoji": "🔶", "pct": 13.0, "color": "#7B68EE",
+        "desc_short": "식품알레르기 → 아토피 → 비염 → 천식 진행 (가장 이른 발병 5.9세)",
+        "symptom_profile": {"콧물": 6, "코막힘": 5, "재채기": 7, "눈 증상": 7},
     },
 }
 
@@ -301,20 +301,22 @@ def _risk_messages(label, sr, sc, ss, so, env: dict) -> list[tuple[str, str]]:
         elif humid <= 30:
             msgs.append(("warning", f"습도 낮음 ({humid:.0f}%) — 코 점막 건조에 주의하고 가습기를 사용하세요."))
 
-    # 유형별 맞춤
-    if label == "콧물·재채기 우세형":
+    # 유형별 맞춤 (동반질환 기반 3유형)
+    if label == "호흡기 알레르기형":
         if pm10 and pm10 > 30:
-            msgs.append(("info", "콧물·재채기 우세형은 항원 노출에 민감합니다. 외출 전 예방약 복용을 의사와 상의하세요."))
+            msgs.append(("info", "호흡기 알레르기형은 항원(꽃가루·먼지)에 민감합니다. 외출 전 예방약 복용을 의사와 상의하세요."))
         if sr >= 7 or ss >= 7:
-            msgs.append(("warning", "콧물·재채기가 심합니다. 꽃가루 농도가 높은 오전 6~10시 외출을 피하세요."))
-    elif label == "코막힘 우세형":
+            msgs.append(("warning", "콧물·재채기가 심합니다. 꽃가루 농도가 높은 오전 6~10시 외출을 피하고 생리식염수 코 세척을 권장합니다."))
+    elif label == "비염+천식 복합형":
         if humid and humid < 40:
-            msgs.append(("info", "건조한 날씨는 코막힘을 악화시킬 수 있습니다. 실내 가습을 권장합니다."))
+            msgs.append(("info", "건조한 날씨는 코막힘과 기관지를 악화시킬 수 있습니다. 실내 가습기 사용을 권장합니다."))
         if sc >= 7:
-            msgs.append(("warning", "코막힘이 심합니다. 취침 시 베개를 높이고 비강 스프레이를 꾸준히 사용하세요."))
-    elif label == "복합 과민형":
+            msgs.append(("warning", "코막힘이 심합니다. 스테로이드 비강 분무제를 꾸준히 사용하고 천식 흡입기를 항상 휴대하세요."))
+        if pm10 and pm10 > 80:
+            msgs.append(("error", "미세먼지 나쁨 — 비염+천식 복합형은 기관지 위험이 높습니다. 외출을 자제하세요."))
+    elif label == "아토픽 마치형":
         if pm25 and pm25 > 35:
-            msgs.append(("error", "초미세먼지가 나쁩니다. 복합 과민형 비염에 특히 위험하니 KF94 마스크를 착용하세요."))
+            msgs.append(("error", "초미세먼지가 나쁩니다. 아토픽 마치형은 복합 알레르기 반응 위험이 높으니 KF94 마스크를 착용하세요."))
         if so >= 7:
             msgs.append(("warning", "눈 증상이 심합니다. 콘택트렌즈를 자제하고 항히스타민 안약을 사용하세요."))
 
@@ -430,20 +432,68 @@ with tab1:
             except Exception as _e:
                 st.warning(f"⚠️ 이력 저장 실패: {_e}")
 
-        label = result["cluster_label"]
-        conf  = result["confidence"] * 100
-        stat  = CLUSTER_STATS.get(label, {})
-        color = stat.get("color", "#888888")
-        emoji = stat.get("emoji", "")
+        label      = result["cluster_label"]
+        conf       = result["confidence"] * 100
+        stat       = CLUSTER_STATS.get(label, {})
+        color      = stat.get("color", "#888888")
+        emoji      = stat.get("emoji", "")
+        model_type = result.get("model_type", "kmeans")
 
-        # ── 결과 카드 (유형명 + 설명) ────────────────────────
+        # ── 모델 뱃지 ─────────────────────────────────────────
+        if model_type == "lightgbm":
+            badge_html = (
+                '<span style="background:#4CAF50;color:white;padding:2px 10px;'
+                'border-radius:12px;font-size:0.75rem;font-weight:700;'
+                'margin-right:8px;">⚡ LightGBM</span>'
+            )
+        else:
+            badge_html = (
+                '<span style="background:#9E9E9E;color:white;padding:2px 10px;'
+                'border-radius:12px;font-size:0.75rem;font-weight:700;'
+                'margin-right:8px;">🔵 K-Means</span>'
+            )
+
+        # ── 결과 카드 (유형명 + 모델 뱃지 + 설명) ───────────
         st.markdown(
             f"""<div class="result-card" style="background:{color}18;border-left:5px solid {color};">
+                <div style="margin-bottom:6px;">{badge_html}
+                    <span style="font-size:0.75rem;color:#777;">
+                      {'실제 확률 기반 예측' if model_type=='lightgbm' else '비지도 학습 클러스터 거리 기반 예측'}
+                    </span>
+                </div>
                 <span style="font-size:1.6rem;font-weight:700;color:{color};">{emoji} {label}</span>
                 <p style="margin:0.6rem 0 0;color:#444;">{result['description']}</p>
             </div>""",
             unsafe_allow_html=True,
         )
+
+        # ── 클래스 확률 바 차트 ───────────────────────────────
+        cluster_probs = result.get("cluster_probs", {})
+        if cluster_probs:
+            prob_labels = list(cluster_probs.keys())
+            prob_vals   = [v * 100 for v in cluster_probs.values()]
+            bar_colors  = [
+                CLUSTER_STATS.get(l, {}).get("color", "#888888")
+                for l in prob_labels
+            ]
+            fig_prob = go.Figure(go.Bar(
+                x=prob_vals,
+                y=[f"{CLUSTER_STATS.get(l,{}).get('emoji','')} {l}" for l in prob_labels],
+                orientation="h",
+                marker_color=bar_colors,
+                text=[f"{v:.1f}%" for v in prob_vals],
+                textposition="outside",
+            ))
+            fig_prob.update_layout(
+                height=160,
+                margin=dict(t=10, b=10, l=10, r=60),
+                xaxis=dict(range=[0, 110], showticklabels=False, showgrid=False),
+                yaxis=dict(tickfont=dict(size=11)),
+                showlegend=False,
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+            st.plotly_chart(fig_prob, use_container_width=True)
 
         # ── Row 1: 유형 변화 추이 + 레이더 나란히 ─
         top_l, top_r = st.columns([1, 1])
@@ -459,9 +509,13 @@ with tab1:
             if not recent_df.empty:
                 # 유형 변화 추이 라인 차트
                 recent_df["유형_id"] = recent_df["cluster_label"].map({
+                    "호흡기 알레르기형": 1,
+                    "비염+천식 복합형": 2,
+                    "아토픽 마치형": 3,
+                    # 구 명칭 호환 (이전 DB 기록용)
                     "콧물·재채기 우세형": 1,
                     "코막힘 우세형": 2,
-                    "복합 과민형": 3
+                    "복합 과민형": 3,
                 })
                 
                 fig_trend = px.line(
@@ -475,7 +529,7 @@ with tab1:
                     yaxis=dict(
                         tickmode='array',
                         tickvals=[1, 2, 3],
-                        ticktext=["콧물·재채기", "코막힘", "복합 과민"],
+                        ticktext=["호흡기 알레르기형", "비염+천식 복합형", "아토픽 마치형"],
                         range=[0.5, 3.5]
                     ),
                     height=260,
@@ -658,12 +712,12 @@ with tab1:
         st.markdown("#### 💡 유형별 증상 패턴 예시")
         ex_cols = st.columns(3)
         examples = [
-            ("💧 콧물·재채기 우세형",
-             "콧물: 8/10\n\n재채기·가려움: 8/10\n\n코막힘: 4/10\n\n눈 증상: 5/10"),
-            ("👃 코막힘 우세형",
-             "코막힘: 9/10\n\n콧물: 3/10\n\n재채기: 3/10\n\n눈 증상: 3/10"),
-            ("👁 복합 과민형",
-             "눈 증상: 8/10\n\n콧물: 6/10\n\n코막힘: 6/10\n\n재채기: 6/10"),
+            ("🌿 호흡기 알레르기형",
+             "콧물: 8/10\n\n재채기·가려움: 8/10\n\n코막힘: 3/10\n\n눈 증상: 5/10\n\n*천식·식품알레르기 없음*"),
+            ("💨 비염+천식 복합형",
+             "코막힘: 9/10\n\n콧물: 5/10\n\n재채기: 5/10\n\n눈 증상: 3/10\n\n*천식 100% 동반*"),
+            ("🔶 아토픽 마치형",
+             "재채기: 7/10\n\n눈 증상: 7/10\n\n콧물: 6/10\n\n코막힘: 5/10\n\n*식품알레르기·아토피 동반*"),
         ]
         for col, (title, desc) in zip(ex_cols, examples):
             with col:

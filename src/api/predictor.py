@@ -1,8 +1,15 @@
 """
 모델 로딩 및 예측 로직
-- K-Means 코호트 모델 (kmeans_rhinitis.pkl = kmeans_childhood.pkl 동일 번들)
-- Step 3에서 학습한 k=3 모델 사용
-- 클러스터 3종: 호흡기 알레르기형 / 비염+천식 복합형 / 아토픽 마치형
+---------------------------------------------------------------------------
+우선순위
+  1순위 : LightGBM 분류기 (lgbm_rhinitis.pkl)
+          - step6_lightgbm.py 실행 후 outputs/models/ 에 생성됨
+          - predict_proba() 로 보정된 확률 점수 제공
+  2순위 : K-Means (kmeans_rhinitis.pkl)
+          - step3_clustering.py 실행 후 생성됨
+          - 거리 역수 softmax 로 확률 근사
+
+클러스터 3종: 호흡기 알레르기형 / 비염+천식 복합형 / 아토픽 마치형
 """
 import numpy as np
 import joblib
@@ -11,8 +18,15 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# step3_clustering.py 가 두 경로에 동일 번들 저장 (kmeans_childhood.pkl 복사본)
-MODEL_PATH = "outputs/models/kmeans_rhinitis.pkl"
+LGBM_PATH   = "outputs/models/lgbm_rhinitis.pkl"
+KMEANS_PATH = "outputs/models/kmeans_rhinitis.pkl"
+
+# ── LightGBM이 사용하는 임상 피처 ─────────────────────────────────
+LGBM_FEATURE_COLS = [
+    "has_asthma", "has_atopic_derm", "has_food_allergy",
+    "food_allergy_count", "rhinitis_onset_age", "rhinitis_duration",
+    "atopic_march", "is_female",
+]
 
 # ── 클러스터별 설명 & 가이드 (동반질환 기반 k=3 — step3와 일치) ──────
 CLUSTER_INFO = {
@@ -60,8 +74,6 @@ CLUSTER_INFO = {
     },
 }
 
-# 예상치 못한 클러스터명 fallback
-
 DEFAULT_INFO = {
     "description": "비염 유형이 분류됐습니다. 전문의 상담을 권장합니다.",
     "guide": ["정밀 검사를 통해 정확한 유형을 파악하고 맞춤 치료를 시작하세요."],
@@ -69,71 +81,101 @@ DEFAULT_INFO = {
 
 
 class RhinitisPredictor:
+    """
+    LightGBM 우선 / K-Means 폴백 예측기.
+
+    반환 dict 공통 키
+      - cluster_id    : int (0~2)
+      - cluster_label : str
+      - confidence    : float  (예측 클래스 확률)
+      - cluster_probs : dict   {label: prob}
+      - description   : str
+      - guide         : list[str]
+      - model_type    : 'lightgbm' | 'kmeans'
+    """
+
     def __init__(self):
-        self.model     = None
-        self.scaler    = None
-        self.features  = None
-        self.label_map = None
+        self.model_type = None
+        # LightGBM 번들 키
+        self._lgbm_model    = None
+        self._lgbm_features = None
+        self._lgbm_label_map = None
+        # K-Means 번들 키
+        self._km_model     = None
+        self._km_scaler    = None
+        self._km_features  = None
+        self._km_label_map = None
+
         self._load_model()
 
+    # ------------------------------------------------------------------
+    # 로딩
+    # ------------------------------------------------------------------
     def _load_model(self):
-        path = Path(MODEL_PATH)
-        if not path.exists():
-            logger.warning(f"모델 파일 없음: {MODEL_PATH}")
-            return
+        # 1순위: LightGBM
+        lgbm_path = Path(LGBM_PATH)
+        if lgbm_path.exists():
+            try:
+                bundle = joblib.load(lgbm_path)
+                self._lgbm_model     = bundle["model"]
+                self._lgbm_features  = bundle.get("features", LGBM_FEATURE_COLS)
+                self._lgbm_label_map = bundle["label_map"]
+                self.model_type      = "lightgbm"
+                logger.info(
+                    f"LightGBM 로드 완료: {LGBM_PATH}  "
+                    f"cv_acc={bundle.get('cv_acc', '?'):.4f}"
+                )
+                return
+            except Exception as exc:
+                logger.warning(f"LightGBM 로드 실패({exc}), K-Means fallback 시도")
 
-        bundle = joblib.load(path)
-
-        # 번들 키 검증
-        required_keys = {"model", "scaler", "features", "label_map"}
-        missing = required_keys - bundle.keys()
-        if missing:
-            raise ValueError(f"모델 번들에 필수 키 누락: {missing}")
-
-        if not hasattr(bundle["model"], "predict"):
-            raise TypeError("bundle['model']이 predict 메서드를 가지지 않습니다.")
-        if not hasattr(bundle["scaler"], "transform"):
-            raise TypeError("bundle['scaler']이 transform 메서드를 가지지 않습니다.")
-        if not isinstance(bundle["features"], list) or not bundle["features"]:
-            raise TypeError("bundle['features']는 비어 있지 않은 list여야 합니다.")
-        if not isinstance(bundle["label_map"], dict):
-            raise TypeError("bundle['label_map']은 dict여야 합니다.")
-
-        self.model     = bundle["model"]
-        self.scaler    = bundle["scaler"]
-        self.features  = bundle["features"]
-        self.label_map = bundle["label_map"]
-        logger.info(
-            f"모델 로드 완료: {MODEL_PATH} "
-            f"(features={self.features}, labels={list(self.label_map.values())})"
-        )
+        # 2순위: K-Means
+        km_path = Path(KMEANS_PATH)
+        if km_path.exists():
+            try:
+                bundle = joblib.load(km_path)
+                required = {"model", "scaler", "features", "label_map"}
+                if required - bundle.keys():
+                    raise ValueError(f"번들 키 누락: {required - bundle.keys()}")
+                self._km_model     = bundle["model"]
+                self._km_scaler    = bundle["scaler"]
+                self._km_features  = bundle["features"]
+                self._km_label_map = bundle["label_map"]
+                self.model_type    = "kmeans"
+                logger.info(f"K-Means 로드 완료: {KMEANS_PATH}")
+            except Exception as exc:
+                logger.error(f"K-Means 로드 실패: {exc}")
+        else:
+            logger.warning(f"모델 파일 없음: {LGBM_PATH}, {KMEANS_PATH}")
 
     @property
     def is_loaded(self) -> bool:
-        return self.model is not None
+        return self.model_type is not None
 
+    # ------------------------------------------------------------------
+    # 예측
+    # ------------------------------------------------------------------
     def predict(self, input_data: dict) -> dict:
         if not self.is_loaded:
             raise RuntimeError("모델이 로드되지 않았습니다.")
 
-        # 피처 벡터 (증상 점수만 사용)
-        X = np.array([[input_data.get(f, 0) for f in self.features]])
-        X_scaled = self.scaler.transform(X)
+        if self.model_type == "lightgbm":
+            return self._predict_lgbm(input_data)
+        return self._predict_kmeans(input_data)
 
-        cluster_id = int(self.model.predict(X_scaled)[0])
-        label      = self.label_map.get(cluster_id, f"클러스터 {cluster_id}")
+    # ── LightGBM 예측 ─────────────────────────────────────────────────
+    def _predict_lgbm(self, input_data: dict) -> dict:
+        X = np.array([[input_data.get(f, 0) for f in self._lgbm_features]])
 
-        # 유형별 확률: 거리 역수를 softmax 방식으로 정규화
-        distances = self.model.transform(X_scaled)[0]
-        inv_dist  = 1.0 / (1.0 + distances)
-        probs     = inv_dist / inv_dist.sum()
-        confidence = float(round(probs[cluster_id], 4))
+        cluster_id = int(self._lgbm_model.predict(X)[0])
+        probs_arr  = self._lgbm_model.predict_proba(X)[0]   # shape (3,)
 
+        label = self._lgbm_label_map.get(cluster_id, f"클러스터 {cluster_id}")
         cluster_probs = {
-            self.label_map.get(i, f"클러스터 {i}"): float(round(probs[i], 4))
-            for i in range(len(self.label_map))
+            self._lgbm_label_map.get(i, f"클러스터 {i}"): float(round(probs_arr[i], 4))
+            for i in range(len(self._lgbm_label_map))
         }
-
+        confidence = float(round(probs_arr[cluster_id], 4))
         info = CLUSTER_INFO.get(label, DEFAULT_INFO)
 
         return {
@@ -143,6 +185,37 @@ class RhinitisPredictor:
             "cluster_probs": cluster_probs,
             "description":   info["description"],
             "guide":         info["guide"],
+            "model_type":    "lightgbm",
+        }
+
+    # ── K-Means 예측 (폴백) ──────────────────────────────────────────
+    def _predict_kmeans(self, input_data: dict) -> dict:
+        X = np.array([[input_data.get(f, 0) for f in self._km_features]])
+        X_scaled = self._km_scaler.transform(X)
+
+        cluster_id = int(self._km_model.predict(X_scaled)[0])
+        label      = self._km_label_map.get(cluster_id, f"클러스터 {cluster_id}")
+
+        # 거리 역수 softmax로 확률 근사
+        distances  = self._km_model.transform(X_scaled)[0]
+        inv_dist   = 1.0 / (1.0 + distances)
+        probs_arr  = inv_dist / inv_dist.sum()
+        confidence = float(round(probs_arr[cluster_id], 4))
+
+        cluster_probs = {
+            self._km_label_map.get(i, f"클러스터 {i}"): float(round(probs_arr[i], 4))
+            for i in range(len(self._km_label_map))
+        }
+        info = CLUSTER_INFO.get(label, DEFAULT_INFO)
+
+        return {
+            "cluster_id":    cluster_id,
+            "cluster_label": label,
+            "confidence":    confidence,
+            "cluster_probs": cluster_probs,
+            "description":   info["description"],
+            "guide":         info["guide"],
+            "model_type":    "kmeans",
         }
 
 
