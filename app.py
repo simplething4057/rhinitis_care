@@ -328,6 +328,12 @@ with st.sidebar:
     
     # 👤 사용자 계정 구분 (Supabase용)
     user_nickname = st.text_input("👤 본인 확인 닉네임", value="사용자1", help="데이터가 이 닉네임에 저장됩니다.")
+    # DB 연결 상태 표시
+    from src.database import engine as _db_engine
+    if _db_engine is not None:
+        st.caption("🟢 DB 연결됨")
+    else:
+        st.caption("🔴 DB 미연결 (이력 저장 불가)")
     st.divider()
 
     st.markdown("### 📋 현재 증상 (0~10점)")
@@ -419,7 +425,10 @@ with tab1:
                 "humidity": env_now.get("humidity", 50),
                 "temperature": env_now.get("temperature", 20)
             }
-            save_history(record, user_nickname)
+            try:
+                save_history(record, user_nickname)
+            except Exception as _e:
+                st.warning(f"⚠️ 이력 저장 실패: {_e}")
 
         label = result["cluster_label"]
         conf  = result["confidence"] * 100
