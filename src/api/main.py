@@ -131,7 +131,7 @@ def get_env_info():
     import sys
     import platform
     import pkg_resources
-    from src.api.predictor import MODEL_PATH, predictor
+    from src.api.predictor import LGBM_PATH, KMEANS_PATH, predictor
 
     def get_version(pkg):
         try:
@@ -146,7 +146,10 @@ def get_env_info():
         "fastapi": get_version("fastapi"),
         "numpy": get_version("numpy"),
         "joblib": get_version("joblib"),
-        "model_path": MODEL_PATH,
+        "lightgbm": get_version("lightgbm"),
+        "model_type": predictor.model_type,
+        "lgbm_path":   LGBM_PATH,
+        "kmeans_path": KMEANS_PATH,
         "model_loaded": predictor.is_loaded,
         "cors_origins": ALLOWED_ORIGINS,
     }

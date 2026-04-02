@@ -45,10 +45,11 @@ class ClusterResult(BaseModel):
     """클러스터링 예측 결과"""
     cluster_id:    int
     cluster_label: str
-    confidence:    float = Field(..., description="유형별 softmax 확률 중 최고값")
+    confidence:    float = Field(..., description="예측 확률 (LightGBM: 보정 확률 / K-Means: 거리 역수 softmax)")
     cluster_probs: dict[str, float] = Field(default_factory=dict, description="각 유형별 소속 확률")
     description:   str
     guide:         list[str]
+    model_type:    str = Field("kmeans", description="사용된 모델: 'lightgbm' | 'kmeans'")
 
 
 class PredictResponse(BaseModel):
