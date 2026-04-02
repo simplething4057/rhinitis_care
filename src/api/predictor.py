@@ -120,10 +120,16 @@ class RhinitisPredictor:
         cluster_id = int(self.model.predict(X_scaled)[0])
         label      = self.label_map.get(cluster_id, f"클러스터 {cluster_id}")
 
-        # 신뢰도: 클러스터 중심까지 거리의 역수 (정규화)
-        distances  = self.model.transform(X_scaled)[0]
-        closest    = distances[cluster_id]
-        confidence = float(round(1 / (1 + closest), 4))
+        # 유형별 확률: 거리 역수를 softmax 방식으로 정규화
+        distances = self.model.transform(X_scaled)[0]
+        inv_dist  = 1.0 / (1.0 + distances)
+        probs     = inv_dist / inv_dist.sum()
+        confidence = float(round(probs[cluster_id], 4))
+
+        cluster_probs = {
+            self.label_map.get(i, f"클러스터 {i}"): float(round(probs[i], 4))
+            for i in range(len(self.label_map))
+        }
 
         info = CLUSTER_INFO.get(label, DEFAULT_INFO)
 
@@ -131,6 +137,7 @@ class RhinitisPredictor:
             "cluster_id":    cluster_id,
             "cluster_label": label,
             "confidence":    confidence,
+            "cluster_probs": cluster_probs,
             "description":   info["description"],
             "guide":         info["guide"],
         }

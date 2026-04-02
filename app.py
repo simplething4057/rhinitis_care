@@ -47,6 +47,21 @@ def _get_api_url() -> str:
 
 API_URL = _get_api_url()
 
+# ── 측정 지역 ────────────────────────────────────────
+STATIONS = {
+    "서울 종로구":   ("종로구",  60, 127),
+    "서울 강남구":   ("강남구",  61, 126),
+    "서울 마포구":   ("마포구",  59, 127),
+    "서울 노원구":   ("노원구",  61, 129),
+    "서울 관악구":   ("관악구",  59, 125),
+    "인천":          ("인천",    55, 124),
+    "수원 (인계동)": ("인계동",  60, 121),
+    "파주":          ("파주",    56, 131),
+    "대전":          ("대전",    67, 100),
+    "대구":          ("대구",    89,  90),
+    "부산":          ("부산",    98,  76),
+}
+
 # ── 클러스터 메타 (증상 기반 3유형) ───────────────────
 CLUSTER_STATS = {
     "콧물·재채기 우세형": {
@@ -198,6 +213,10 @@ def _pm25_grade(val: float) -> tuple[str, str]:
     return "매우나쁨", "#B71C1C"
 
 
+has_air_key     = bool(os.getenv("AIRKOREA_API_KEY"))
+has_weather_key = bool(os.getenv("KMA_API_KEY"))
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_air(station: str):
     from src.data.api_collector import fetch_airkorea
@@ -208,6 +227,95 @@ def _fetch_air(station: str):
 def _fetch_weather(nx: int, ny: int):
     from src.data.api_collector import fetch_kma_forecast
     return fetch_kma_forecast(nx=nx, ny=ny)
+
+
+def _get_current_env(station_name: str, nx: int, ny: int) -> dict:
+    """현재 시각 기준 대기·날씨 데이터를 반환. 실패 시 빈 dict."""
+    result = {}
+    if has_air_key:
+        try:
+            air_df  = _fetch_air(station_name)
+            latest  = air_df.dropna(subset=["pm10"]).iloc[-1]
+            result["pm10"]  = latest.get("pm10")  or 0
+            result["pm25"]  = latest.get("pm25")  or 0
+        except Exception:
+            pass
+    if has_weather_key:
+        try:
+            import math as _math
+            from datetime import timezone, timedelta as _td
+            wx_df  = _fetch_weather(nx, ny)
+            tmp_df = wx_df.dropna(subset=["temperature"]).copy()
+            tmp_df["_dt"] = pd.to_datetime(
+                tmp_df["date"].astype(str) + tmp_df["time"].astype(str).str.zfill(4),
+                format="%Y%m%d%H%M", errors="coerce",
+            )
+            tmp_df  = tmp_df.dropna(subset=["_dt"]).sort_values("_dt").reset_index(drop=True)
+            _KST    = timezone(_td(hours=9))
+            now_ts  = pd.Timestamp.now(tz=_KST).replace(tzinfo=None)
+            future  = tmp_df[tmp_df["_dt"] >= now_ts]
+            row     = future.iloc[0] if not future.empty else tmp_df.iloc[-1]
+            result["temperature"] = row.get("temperature")
+            h = row.get("humidity")
+            result["humidity"]    = None if (h is None or (isinstance(h, float) and _math.isnan(h))) else h
+        except Exception:
+            pass
+    return result
+
+
+def _risk_messages(label, sr, sc, ss, so, env: dict) -> list[tuple[str, str]]:
+    """증상 + 환경 기반 위험 메시지 목록 반환. (type, text) 리스트."""
+    msgs = []
+    total = sr + sc + ss + so
+    sev   = total / 40 * 100
+
+    pm10  = env.get("pm10")
+    pm25  = env.get("pm25")
+    humid = env.get("humidity")
+
+    # 전체 심각도
+    if sev >= 75:
+        msgs.append(("error",   "증상이 매우 심각합니다. 이비인후과 방문을 강력히 권장합니다."))
+    elif sev >= 50:
+        msgs.append(("warning", "증상이 중등도 이상입니다. 증상 악화 시 의사 상담을 권장합니다."))
+
+    # 대기질
+    if pm10 is not None:
+        if pm10 > 150:
+            msgs.append(("error",   f"미세먼지 매우 나쁨 ({pm10:.0f}㎍/㎥) — 외출을 삼가고 공기청정기를 가동하세요."))
+        elif pm10 > 80:
+            msgs.append(("warning", f"미세먼지 나쁨 ({pm10:.0f}㎍/㎥) — KF80 이상 마스크 착용을 권장합니다."))
+        elif pm10 > 30:
+            msgs.append(("info",    f"미세먼지 보통 ({pm10:.0f}㎍/㎥) — 민감군은 외출 시 주의하세요."))
+
+    if pm25 is not None and pm25 > 35:
+        msgs.append(("warning", f"초미세먼지 나쁨 ({pm25:.0f}㎍/㎥) — 코·목 점막에 직접 영향을 줄 수 있습니다."))
+
+    # 습도
+    if humid is not None:
+        if humid >= 70:
+            msgs.append(("warning", f"습도 높음 ({humid:.0f}%) — 실내 환기와 제습을 권장합니다."))
+        elif humid <= 30:
+            msgs.append(("warning", f"습도 낮음 ({humid:.0f}%) — 코 점막 건조에 주의하고 가습기를 사용하세요."))
+
+    # 유형별 맞춤
+    if label == "콧물·재채기 우세형":
+        if pm10 and pm10 > 30:
+            msgs.append(("info", "콧물·재채기 우세형은 항원 노출에 민감합니다. 외출 전 예방약 복용을 의사와 상의하세요."))
+        if sr >= 7 or ss >= 7:
+            msgs.append(("warning", "콧물·재채기가 심합니다. 꽃가루 농도가 높은 오전 6~10시 외출을 피하세요."))
+    elif label == "코막힘 우세형":
+        if humid and humid < 40:
+            msgs.append(("info", "건조한 날씨는 코막힘을 악화시킬 수 있습니다. 실내 가습을 권장합니다."))
+        if sc >= 7:
+            msgs.append(("warning", "코막힘이 심합니다. 취침 시 베개를 높이고 비강 스프레이를 꾸준히 사용하세요."))
+    elif label == "복합 과민형":
+        if pm25 and pm25 > 35:
+            msgs.append(("error", "초미세먼지가 나쁩니다. 복합 과민형 비염에 특히 위험하니 KF94 마스크를 착용하세요."))
+        if so >= 7:
+            msgs.append(("warning", "눈 증상이 심합니다. 콘택트렌즈를 자제하고 항히스타민 안약을 사용하세요."))
+
+    return msgs
 
 
 # ── 사이드바 ──────────────────────────────────────────
@@ -244,6 +352,11 @@ with st.sidebar:
             "💡 **아토픽 마치**: 식품알레르기 → 아토피 → 비염 → 천식 순서로 "
             "진행되는 알레르기 자연 경과."
         )
+
+    st.divider()
+    st.markdown("### 📍 측정 지역")
+    selected_station = st.selectbox("지역 선택", list(STATIONS.keys()), label_visibility="collapsed")
+    station_name, nx, ny = STATIONS[selected_station]
 
     st.divider()
     predict_btn = st.button(
@@ -308,34 +421,32 @@ with tab1:
             unsafe_allow_html=True,
         )
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("예측 신뢰도",  f"{conf:.1f}%")
-        col2.metric("유형 비율",    f"{stat.get('pct', '-')}%")
-        col3.metric("주요 특징",    stat.get("desc_short", "-"))
+        # ── 유형별 확률 (컴팩트) ──────────────────────────
+        cluster_probs = result.get("cluster_probs", {label: conf / 100})
+        prob_labels = list(cluster_probs.keys())
+        prob_vals   = [v * 100 for v in cluster_probs.values()]
+        bar_colors  = [CLUSTER_STATS.get(l, {}).get("color", "#888888") for l in prob_labels]
+        fig_prob = go.Figure(go.Bar(
+            x=prob_vals, y=prob_labels, orientation="h",
+            marker_color=bar_colors,
+            text=[f"{v:.1f}%" for v in prob_vals],
+            textposition="auto",
+        ))
+        fig_prob.update_layout(
+            height=110,
+            margin=dict(t=4, b=4, l=4, r=4),
+            xaxis=dict(range=[0, 100], visible=False),
+            yaxis=dict(title=None, tickfont_size=11),
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+        )
+        st.caption("**유형별 소속 확률** (거리 역수 softmax 정규화)")
+        st.plotly_chart(fig_prob, use_container_width=True)
 
         left, right = st.columns([1, 1])
 
-        # 신뢰도 게이지
-        with left:
-            fig_gauge = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=conf,
-                title={"text": "신뢰도 (%)"},
-                gauge={
-                    "axis": {"range": [0, 100]},
-                    "bar":  {"color": color},
-                    "steps": [
-                        {"range": [0,  40], "color": "#FFCDD2"},
-                        {"range": [40, 70], "color": "#FFF9C4"},
-                        {"range": [70,100], "color": "#C8E6C9"},
-                    ],
-                },
-            ))
-            fig_gauge.update_layout(height=240, margin=dict(t=40, b=10, l=20, r=20))
-            st.plotly_chart(fig_gauge, use_container_width=True)
-
         # 입력 증상 프로파일 레이더
-        with right:
+        with left:
             cats   = ["콧물", "코막힘", "재채기", "눈 증상"]
             values = [s_rhinorrhea * 10, s_congestion * 10, s_sneezing * 10, s_ocular * 10]
             fig_radar = go.Figure(go.Scatterpolar(
@@ -378,6 +489,84 @@ with tab1:
                 """,
                 unsafe_allow_html=True,
             )
+
+        # ── 오늘의 위험수준 대시보드 ──────────────────────
+        st.divider()
+        st.markdown("#### 🚨 오늘의 위험수준 대시보드")
+
+        total_score = s_rhinorrhea + s_congestion + s_sneezing + s_ocular
+        sev_pct     = total_score / 40 * 100
+        if sev_pct < 25:   sev_label, sev_color = "경미",   "#4CAF50"
+        elif sev_pct < 50: sev_label, sev_color = "보통",   "#FFC107"
+        elif sev_pct < 75: sev_label, sev_color = "주의",   "#FF5722"
+        else:               sev_label, sev_color = "심각",   "#B71C1C"
+
+        env = _get_current_env(station_name, nx, ny)
+
+        dash_l, dash_r = st.columns([1, 1])
+
+        with dash_l:
+            sym_items = [
+                ("콧물",   s_rhinorrhea, "#4A90D9"),
+                ("코막힘", s_congestion, "#E8784A"),
+                ("재채기", s_sneezing,   "#2ECC71"),
+                ("눈 증상", s_ocular,    "#7B68EE"),
+            ]
+            nz = [(l, v, c) for l, v, c in sym_items if v > 0]
+            if nz:
+                fig_risk = go.Figure(go.Pie(
+                    labels=[x[0] for x in nz],
+                    values=[x[1] for x in nz],
+                    marker_colors=[x[2] for x in nz],
+                    textinfo="percent+label",
+                    hole=0.48,
+                ))
+            else:
+                fig_risk = go.Figure(go.Pie(
+                    labels=["증상 없음"], values=[1],
+                    marker_colors=["#CCCCCC"], textinfo="label", hole=0.48,
+                ))
+            fig_risk.update_layout(
+                height=260,
+                margin=dict(t=30, b=5, l=5, r=5),
+                title=dict(text="오늘의 증상 분포", font_size=13),
+                showlegend=False,
+                annotations=[dict(
+                    text=f"<b>{sev_label}</b><br>{sev_pct:.0f}%",
+                    x=0.5, y=0.5, font_size=13, showarrow=False,
+                )],
+            )
+            st.plotly_chart(fig_risk, use_container_width=True)
+
+        with dash_r:
+            # 위험도 뱃지
+            st.markdown(
+                f"""<div style="background:{sev_color}22;border-left:4px solid {sev_color};
+                        padding:10px 14px;border-radius:6px;margin-bottom:10px;">
+                    <b style="color:{sev_color};">종합 위험도: {sev_label}</b>
+                    <div style="margin-top:4px;color:#555;font-size:0.86rem;">
+                        증상 합계 {total_score}/40점 ({sev_pct:.0f}%)
+                    </div></div>""",
+                unsafe_allow_html=True,
+            )
+            # 환경 지표
+            pm10  = env.get("pm10")
+            pm25  = env.get("pm25")
+            humid = env.get("humidity")
+            if pm10 is not None or humid is not None:
+                env_cols = st.columns(3)
+                if pm10  is not None: env_cols[0].metric("PM10",  f"{pm10:.0f}㎍")
+                if pm25  is not None: env_cols[1].metric("PM2.5", f"{pm25:.0f}㎍")
+                if humid is not None: env_cols[2].metric("습도",   f"{humid:.0f}%")
+            # 안내 메시지
+            msgs = _risk_messages(label, s_rhinorrhea, s_congestion, s_sneezing, s_ocular, env)
+            if msgs:
+                for mtype, mtext in msgs:
+                    if mtype == "error":   st.error(mtext)
+                    elif mtype == "warning": st.warning(mtext)
+                    else:                    st.info(mtext)
+            else:
+                st.success("오늘 증상이 경미하고 환경 조건도 양호합니다. 현재 관리 방법을 유지하세요.")
 
         with st.expander("입력 정보 요약"):
             st.json(payload)
@@ -480,24 +669,7 @@ with tab3:
 # ────────────────────────────────────────────────────
 # Tab 4: 환경 정보 (에어코리아 + 기상청)
 # ────────────────────────────────────────────────────
-STATIONS = {
-    "서울 종로구": ("종로구",  60, 127),
-    "서울 강남구": ("강남구",  61, 126),
-    "서울 마포구": ("마포구",  59, 127),
-    "서울 노원구": ("노원구",  61, 129),
-    "서울 관악구": ("관악구",  59, 125),
-    "인천":        ("인천",    55, 124),
-    "수원 (인계동)": ("인계동", 60, 121),
-    "파주":        ("파주",    56, 131),
-    "대전":        ("대전",    67, 100),
-    "대구":        ("대구",    89,  90),
-    "부산":        ("부산",    98,  76),
-}
-
 with tab4:
-    has_air_key     = bool(os.getenv("AIRKOREA_API_KEY"))
-    has_weather_key = bool(os.getenv("KMA_API_KEY"))
-
     if not has_air_key and not has_weather_key:
         st.warning(
             "API 키가 설정되지 않았습니다.  \n"
@@ -505,8 +677,7 @@ with tab4:
             "`AIRKOREA_API_KEY` 와 `KMA_API_KEY` 를 입력해주세요."
         )
     else:
-        selected = st.selectbox("📍 측정 지역", list(STATIONS.keys()))
-        station_name, nx, ny = STATIONS[selected]
+        st.caption(f"📍 측정 지역: **{selected_station}** (사이드바에서 변경)")
 
         # ── 에어코리아 ─────────────────────────────────
         st.markdown("### 💨 대기 환경")
@@ -572,7 +743,9 @@ with tab4:
                         format="%Y%m%d%H%M", errors="coerce",
                     )
                     tmp_df = tmp_df.dropna(subset=["_dt"]).sort_values("_dt").reset_index(drop=True)
-                    now_ts = pd.Timestamp.now()
+                    from datetime import timezone, timedelta as _td
+                    _KST = timezone(_td(hours=9))
+                    now_ts = pd.Timestamp.now(tz=_KST).replace(tzinfo=None)
                     future = tmp_df[tmp_df["_dt"] >= now_ts]
                     latest_wx = (future.iloc[0] if not future.empty else tmp_df.iloc[-1])
                     temp   = latest_wx.get("temperature",  "-")
