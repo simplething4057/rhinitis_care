@@ -403,40 +403,37 @@ with tab1:
         color = stat.get("color", "#888888")
         emoji = stat.get("emoji", "")
 
-        # ── Row 1: 유형명 + 레이더 나란히 ───────────────────
+        # ── 결과 카드 (유형명 + 설명) ────────────────────────
+        st.markdown(
+            f"""<div class="result-card" style="background:{color}18;border-left:5px solid {color};">
+                <span style="font-size:1.6rem;font-weight:700;color:{color};">{emoji} {label}</span>
+                <p style="margin:0.6rem 0 0;color:#444;">{result['description']}</p>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+        # ── Row 1: 유형별 소속 확률 파이차트 + 레이더 나란히 ─
         top_l, top_r = st.columns([1, 1])
 
         with top_l:
-            # 유형명
-            st.markdown(
-                f"""<div style="background:{color}18;border-left:5px solid {color};
-                        padding:14px 18px;border-radius:8px;margin-bottom:12px;">
-                    <span style="font-size:1.5rem;font-weight:700;color:{color};">
-                        {emoji} {label}
-                    </span>
-                </div>""",
-                unsafe_allow_html=True,
-            )
-            # 유형별 소속 확률
             cluster_probs = result.get("cluster_probs", {label: conf / 100})
             prob_labels = list(cluster_probs.keys())
             prob_vals   = [v * 100 for v in cluster_probs.values()]
-            bar_colors  = [CLUSTER_STATS.get(l, {}).get("color", "#888888") for l in prob_labels]
-            fig_prob = go.Figure(go.Bar(
-                x=prob_vals, y=prob_labels, orientation="h",
-                marker_color=bar_colors,
-                text=[f"{v:.1f}%" for v in prob_vals],
-                textposition="auto",
+            pie_colors  = [CLUSTER_STATS.get(l, {}).get("color", "#888888") for l in prob_labels]
+            fig_prob = go.Figure(go.Pie(
+                labels=prob_labels,
+                values=prob_vals,
+                marker_colors=pie_colors,
+                textinfo="percent+label",
+                textfont_size=11,
+                hole=0.0,
             ))
             fig_prob.update_layout(
-                height=110,
-                margin=dict(t=4, b=4, l=4, r=4),
-                xaxis=dict(range=[0, 100], visible=False),
-                yaxis=dict(title=None, tickfont_size=11),
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
+                height=260,
+                margin=dict(t=30, b=5, l=5, r=5),
+                title=dict(text="유형별 소속 확률", font_size=13),
+                showlegend=False,
             )
-            st.caption("유형별 소속 확률")
             st.plotly_chart(fig_prob, use_container_width=True)
 
         with top_r:
