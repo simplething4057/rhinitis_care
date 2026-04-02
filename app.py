@@ -6,11 +6,15 @@
   - 직접 모드 : API 미연결 시 predictor를 직접 임포트해 추론 (Streamlit Cloud 무료 배포용)
 """
 import os
+import json
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from pathlib import Path
 from dotenv import load_dotenv
+
+from src.utils.history import save_history, get_recent_history, generate_synthetic_history
 
 load_dotenv()
 
@@ -396,6 +400,23 @@ with tab1:
 
         with st.spinner("증상 패턴 분석 중..."):
             result = run_predict(payload)
+            
+            # 환경 정보 가져오기 (사전 정의된 함수 활용)
+            env_now = _get_current_env(station_name, nx, ny)
+            
+            # 기록 저장
+            record = {
+                "cluster_label": result["cluster_label"],
+                "symptom_rhinorrhea": s_rhinorrhea,
+                "symptom_congestion": s_congestion,
+                "symptom_sneezing": s_sneezing,
+                "symptom_ocular": s_ocular,
+                "pm10": env_now.get("pm10", 0),
+                "pm25": env_now.get("pm25", 0),
+                "humidity": env_now.get("humidity", 50),
+                "temperature": env_now.get("temperature", 20)
+            }
+            save_history(record)
 
         label = result["cluster_label"]
         conf  = result["confidence"] * 100
@@ -412,29 +433,45 @@ with tab1:
             unsafe_allow_html=True,
         )
 
-        # ── Row 1: 유형별 소속 확률 파이차트 + 레이더 나란히 ─
+        # ── Row 1: 유형 변화 추이 + 레이더 나란히 ─
         top_l, top_r = st.columns([1, 1])
 
         with top_l:
-            cluster_probs = result.get("cluster_probs", {label: conf / 100})
-            prob_labels = list(cluster_probs.keys())
-            prob_vals   = [v * 100 for v in cluster_probs.values()]
-            pie_colors  = [CLUSTER_STATS.get(l, {}).get("color", "#888888") for l in prob_labels]
-            fig_prob = go.Figure(go.Pie(
-                labels=prob_labels,
-                values=prob_vals,
-                marker_colors=pie_colors,
-                textinfo="percent+label",
-                textfont_size=11,
-                hole=0.0,
-            ))
-            fig_prob.update_layout(
-                height=260,
-                margin=dict(t=30, b=5, l=5, r=5),
-                title=dict(text="유형별 소속 확률", font_size=13),
-                showlegend=False,
-            )
-            st.plotly_chart(fig_prob, use_container_width=True)
+            recent_df = get_recent_history(days=7)
+            
+            # 데이터가 부족하면 테스트용 데이터 생성 (최초 실행 시)
+            if len(recent_df) < 3:
+                generate_synthetic_history()
+                recent_df = get_recent_history(days=7)
+
+            if not recent_df.empty:
+                # 유형 변화 추이 라인 차트
+                recent_df["유형_id"] = recent_df["cluster_label"].map({
+                    "콧물·재채기 우세형": 1,
+                    "코막힘 우세형": 2,
+                    "복합 과민형": 3
+                })
+                
+                fig_trend = px.line(
+                    recent_df, x="timestamp", y="유형_id",
+                    markers=True,
+                    title="최근 7일 유형 변화 추이",
+                    labels={"유형_id": "비염 유형", "timestamp": "날짜"}
+                )
+                
+                fig_trend.update_layout(
+                    yaxis=dict(
+                        tickmode='array',
+                        tickvals=[1, 2, 3],
+                        ticktext=["콧물·재채기", "코막힘", "복합 과민"],
+                        range=[0.5, 3.5]
+                    ),
+                    height=260,
+                    margin=dict(t=50, b=5, l=5, r=5),
+                )
+                st.plotly_chart(fig_trend, use_container_width=True)
+            else:
+                st.info("데이터가 충분하지 않아 추이를 표시할 수 없습니다.")
 
         with top_r:
             cats   = ["콧물", "코막힘", "재채기", "눈 증상"]
@@ -465,6 +502,53 @@ with tab1:
                 legend=dict(orientation="h", y=-0.1),
             )
             st.plotly_chart(fig_radar, use_container_width=True)
+
+        # ── Row Ex: 최근 7일 증상 점수 변화 ──────────────────
+        st.markdown("#### 📈 최근 7일 증상 점수 추이")
+        if not recent_df.empty:
+            # 점수 데이터 리쉐이핑 (Plotly용)
+            score_df = recent_df.melt(
+                id_vars=["timestamp"],
+                value_vars=["symptom_rhinorrhea", "symptom_congestion", "symptom_sneezing", "symptom_ocular"],
+                var_name="증상", value_name="점수"
+            )
+            score_df["증상"] = score_df["증상"].map({
+                "symptom_rhinorrhea": "콧물",
+                "symptom_congestion": "코막힘",
+                "symptom_sneezing": "재채기",
+                "symptom_ocular": "눈 증상"
+            })
+            
+            fig_scores = px.line(
+                score_df, x="timestamp", y="점수", color="증상",
+                markers=True,
+                color_discrete_map={"콧물": "#4A90D9", "코막힘": "#E8784A", "재채기": "#2ECC71", "눈 증상": "#7B68EE"}
+            )
+            fig_scores.update_layout(height=300, margin=dict(t=10, b=10), yaxis_range=[0, 10])
+            st.plotly_chart(fig_scores, use_container_width=True)
+
+            # 💡 인사이트 제공
+            if len(recent_df) >= 2:
+                prev_record = recent_df.iloc[-2]
+                curr_record = recent_df.iloc[-1]
+                
+                prev_label = prev_record["cluster_label"]
+                curr_label = curr_record["cluster_label"]
+                
+                insight_parts = []
+                if prev_label != curr_label:
+                    # 유형이 변한 경우
+                    insight_msg = f"지난 기록에서는 **{prev_label}**이었는데, 현재는 **{curr_label}**로 변화되었습니다."
+                    
+                    # 환경 요인과의 상관관계 분석
+                    if curr_record["pm10"] > prev_record["pm10"] + 20:
+                        insight_msg += f" 최근 미세먼지(PM10) 농도가 상승하면서 증상 패턴이 달라진 것으로 보입니다."
+                    elif curr_record["humidity"] < prev_record["humidity"] - 10:
+                        insight_msg += f" 대기가 건조해지면서 비강 점막에 변화가 생겼을 가능성이 큽니다."
+                    
+                    st.info(f"💡 **변화 인사이트**: \"{insight_msg}\" (환경과의 상관관계를 체감하실 수 있습니다.)")
+                else:
+                    st.success(f"💡 **상태 유지**: 비염 유형이 **{curr_label}**로 안정적으로 유지되고 있습니다. 현재의 관리 방식을 지속하세요.")
 
         # ── Row 2: 오늘의 위험수준 ───────────────────────
         st.divider()

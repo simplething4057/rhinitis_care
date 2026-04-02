@@ -136,10 +136,14 @@ def fetch_kma_forecast(nx: int = 60, ny: int = 127) -> pd.DataFrame:
     if cached is not None:
         return cached
 
-    now = datetime.now()
+    # KMA API는 KST(UTC+9) 기준으로 동작 — 서버 타임존 무관하게 KST 사용
+    from datetime import timezone, timedelta as _td
+    _KST = timezone(_td(hours=9))
+    now = datetime.now(_KST).replace(tzinfo=None)
+
     # 기상청 예보 발표 시간 (02, 05, 08, 11, 14, 17, 20, 23) — 발표 후 약 10분 지연
     _ISSUE_HOURS = [2, 5, 8, 11, 14, 17, 20, 23]
-    cur_hour = now.hour - (1 if now.minute < 10 else 0)  # 발표 후 10분 여유
+    cur_hour = now.hour - (1 if now.minute < 10 else 0)
     past = [h for h in _ISSUE_HOURS if h <= cur_hour]
     if past:
         base_date = now.strftime("%Y%m%d")
