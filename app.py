@@ -6,22 +6,21 @@
   - 직접 모드 : API 미연결 시 predictor를 직접 임포트해 추론 (Streamlit Cloud 무료 배포용)
 """
 import os
-import json
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from pathlib import Path
 from dotenv import load_dotenv
-
-from src.utils.history import save_history, get_recent_history, generate_synthetic_history
 
 load_dotenv()
 
-# Streamlit Cloud secrets → os.environ 브릿지
-for _k in ("AIRKOREA_API_KEY", "KMA_API_KEY", "APP_ENV"):
+# Streamlit Cloud secrets → os.environ 브릿지 (DB import 전에 실행해야 함)
+for _k in ("AIRKOREA_API_KEY", "KMA_API_KEY", "APP_ENV", "DATABASE_URL"):
     if _k in st.secrets and not os.getenv(_k):
         os.environ[_k] = st.secrets[_k]
+
+# DB 의존 모듈은 환경변수 설정 후 임포트
+from src.utils.history import save_history, get_recent_history, generate_synthetic_history
 
 
 def _hex_rgba(hex_color: str, alpha: float = 0.27) -> str:
@@ -326,6 +325,10 @@ def _risk_messages(label, sr, sc, ss, so, env: dict) -> list[tuple[str, str]]:
 with st.sidebar:
     st.markdown("## 🌿 비염 케어 AI")
     st.divider()
+    
+    # 👤 사용자 계정 구분 (Supabase용)
+    user_nickname = st.text_input("👤 본인 확인 닉네임", value="사용자1", help="데이터가 이 닉네임에 저장됩니다.")
+    st.divider()
 
     st.markdown("### 📋 현재 증상 (0~10점)")
     s_rhinorrhea = st.slider("💧 콧물",        0, 10, 5)
@@ -404,7 +407,7 @@ with tab1:
             # 환경 정보 가져오기 (사전 정의된 함수 활용)
             env_now = _get_current_env(station_name, nx, ny)
             
-            # 기록 저장
+            # 기록 저장 (현 시점 로컬 PostgreSQL/Supabase 통합 인터페이스: user_nickname 반영)
             record = {
                 "cluster_label": result["cluster_label"],
                 "symptom_rhinorrhea": s_rhinorrhea,
@@ -416,7 +419,7 @@ with tab1:
                 "humidity": env_now.get("humidity", 50),
                 "temperature": env_now.get("temperature", 20)
             }
-            save_history(record)
+            save_history(record, user_nickname)
 
         label = result["cluster_label"]
         conf  = result["confidence"] * 100
@@ -437,12 +440,12 @@ with tab1:
         top_l, top_r = st.columns([1, 1])
 
         with top_l:
-            recent_df = get_recent_history(days=7)
+            recent_df = get_recent_history(user_nickname, days=7)
             
-            # 데이터가 부족하면 테스트용 데이터 생성 (최초 실행 시)
+            # 데이터가 부족하면 테스트용 데이터 생성 (최초 실행 시, 사용자별 생성)
             if len(recent_df) < 3:
-                generate_synthetic_history()
-                recent_df = get_recent_history(days=7)
+                generate_synthetic_history(user_nickname)
+                recent_df = get_recent_history(user_nickname, days=7)
 
             if not recent_df.empty:
                 # 유형 변화 추이 라인 차트

@@ -37,3 +37,6 @@ data/external/*.json
 # OS
 .DS_Store
 Thumbs.db
+
+# 임시 디버그 스크립트
+check_*.py

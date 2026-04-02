@@ -1,70 +1,122 @@
-import json
-import os
 import pandas as pd
 from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+from src.database import SessionLocal, engine, Base
+from src.models import PredictionHistory
 
-HISTORY_FILE = "data/prediction_history.json"
-
-def save_history(record: dict):
-    os.makedirs("data", exist_ok=True)
-    history = load_history()
-    
-    # Add timestamp if not exists
-    if "timestamp" not in record:
-        record["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    history.append(record)
-    
-    # Keep only records from last 30 days (optional, can be more)
-    # but for simplicity, let's just save everything and filter on load
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
-
-def load_history():
-    if not os.path.exists(HISTORY_FILE):
-        return []
+# 앱 실행 시 테이블 자동 생성 (URL 설정이 된 경우에만)
+if engine is not None:
     try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"⚠️ 테이블 생성 중 오류 발생 (DB가 실행 중인지 확인하세요): {e}")
+else:
+    print("⚠️ DB 연결이 설정되지 않아 테이블을 생성하지 않았습니다.")
 
-def get_recent_history(days=7):
-    history = load_history()
-    if not history:
+def save_history(record: dict, user_id: str):
+    if SessionLocal is None:
+        print("⚠️ DB 연결이 설정되지 않았으므로 기록을 저장하지 않습니다.")
+        return
+
+    db: Session = SessionLocal()
+    try:
+        new_record = PredictionHistory(
+            user_id=user_id,
+            cluster_label=record["cluster_label"],
+            symptom_rhinorrhea=record["symptom_rhinorrhea"],
+            symptom_congestion=record["symptom_congestion"],
+            symptom_sneezing=record["symptom_sneezing"],
+            symptom_ocular=record["symptom_ocular"],
+            pm10=record.get("pm10", 0),
+            pm25=record.get("pm25", 0),
+            humidity=record.get("humidity", 50),
+            temperature=record.get("temperature", 20),
+            created_at=datetime.now()
+        )
+        db.add(new_record)
+        db.commit()
+        db.refresh(new_record)
+    except Exception as e:
+        db.rollback()
+        print(f"데이터 저장 중 오류 발생: {e}")
+    finally:
+        db.close()
+
+def get_recent_history(user_id: str, days=7):
+    if SessionLocal is None:
         return pd.DataFrame()
-        
-    df = pd.DataFrame(history)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    threshold = datetime.now() - timedelta(days=days)
-    recent_df = df[df["timestamp"] >= threshold].sort_values("timestamp")
-    return recent_df
 
-def generate_synthetic_history():
-    """테스트용 가상 데이터 생성 (현재 시점 기준 지난 7일치)"""
+    db: Session = SessionLocal()
+    try:
+        threshold = datetime.now() - timedelta(days=days)
+        results = db.query(PredictionHistory).filter(
+            PredictionHistory.user_id == user_id,
+            PredictionHistory.created_at >= threshold
+        ).order_by(PredictionHistory.created_at.asc()).all()
+        
+        if results:
+            # SQLAlchemy 객체를 데이터프레임으로 변환
+            data_list = []
+            for r in results:
+                data_list.append({
+                    "timestamp": r.created_at,
+                    "cluster_label": r.cluster_label,
+                    "symptom_rhinorrhea": r.symptom_rhinorrhea,
+                    "symptom_congestion": r.symptom_congestion,
+                    "symptom_sneezing": r.symptom_sneezing,
+                    "symptom_ocular": r.symptom_ocular,
+                    "pm10": r.pm10,
+                    "pm25": r.pm25,
+                    "humidity": r.humidity,
+                    "temperature": r.temperature
+                })
+            return pd.DataFrame(data_list)
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"데이터 조회 중 오류 발생: {e}")
+        return pd.DataFrame()
+    finally:
+        db.close()
+
+def generate_synthetic_history(user_id: str):
+    """최초 실행 시 가상 데이터 생성 (SQLAlchemy 저장)"""
+    if SessionLocal is None:
+        print("⚠️ DB 연결이 설정되지 않았으므로 가상 데이터를 생성하지 않습니다.")
+        return
+
     import random
+    db: Session = SessionLocal()
     
-    history = []
     types = ["콧물·재채기 우세형", "코막힘 우세형", "복합 과민형"]
     now = datetime.now()
     
-    for i in range(7, 0, -1):
-        dt = now - timedelta(days=i)
-        # Random but slightly stable type
-        label = types[0] if i > 3 else types[1] # Change type mid-week
-        record = {
-            "timestamp": dt.strftime("%Y-%m-%d %H:%M:%S"),
-            "cluster_label": label,
-            "symptom_rhinorrhea": random.randint(3, 8),
-            "symptom_congestion": random.randint(3, 9),
-            "symptom_sneezing": random.randint(2, 7),
-            "symptom_ocular": random.randint(1, 6),
-            "pm10": random.randint(20, 100),
-            "humidity": random.randint(30, 80)
-        }
-        history.append(record)
-    
-    os.makedirs("data", exist_ok=True)
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
-    return pd.DataFrame(history)
+    try:
+        # 이미 데이터가 있으면 생성하지 않음 (중복 생성 방지)
+        if db.query(PredictionHistory).filter(PredictionHistory.user_id == user_id).first():
+            return
+
+        records = []
+        for i in range(7, 0, -1):
+            dt = now - timedelta(days=i)
+            label = random.choice(types)
+            new_record = PredictionHistory(
+                user_id=user_id,
+                created_at=dt,
+                cluster_label=label,
+                symptom_rhinorrhea=random.randint(3, 8),
+                symptom_congestion=random.randint(3, 9),
+                symptom_sneezing=random.randint(2, 7),
+                symptom_ocular=random.randint(1, 6),
+                pm10=random.randint(20, 100),
+                humidity=random.randint(30, 80),
+                temperature=random.randint(15, 25)
+            )
+            records.append(new_record)
+        
+        db.bulk_save_objects(records)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"가상 데이터 생성 중 오류 발생: {e}")
+    finally:
+        db.close()

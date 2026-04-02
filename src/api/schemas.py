@@ -45,7 +45,8 @@ class ClusterResult(BaseModel):
     """클러스터링 예측 결과"""
     cluster_id:    int
     cluster_label: str
-    confidence:    float = Field(..., description="예측 신뢰도 (클러스터 중심까지 거리 역수 기반)")
+    confidence:    float = Field(..., description="유형별 softmax 확률 중 최고값")
+    cluster_probs: dict[str, float] = Field(default_factory=dict, description="각 유형별 소속 확률")
     description:   str
     guide:         list[str]
 
