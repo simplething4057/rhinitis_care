@@ -403,50 +403,43 @@ with tab1:
         color = stat.get("color", "#888888")
         emoji = stat.get("emoji", "")
 
-        # 결과 카드
-        st.markdown(
-            f"""
-            <div class="result-card" style="
-                background:{color}18; border-left:5px solid {color};
-            ">
-                <span style="font-size:1.6rem;font-weight:700;color:{color};">
-                    {emoji} {label}
-                </span>
-                <span style="margin-left:14px;color:#555;font-size:0.95rem;">
-                    신뢰도 {conf:.1f}%
-                </span>
-                <p style="margin:0.6rem 0 0;color:#444;">{result['description']}</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        # ── Row 1: 유형명 + 레이더 나란히 ───────────────────
+        top_l, top_r = st.columns([1, 1])
 
-        # ── 유형별 확률 (컴팩트) ──────────────────────────
-        cluster_probs = result.get("cluster_probs", {label: conf / 100})
-        prob_labels = list(cluster_probs.keys())
-        prob_vals   = [v * 100 for v in cluster_probs.values()]
-        bar_colors  = [CLUSTER_STATS.get(l, {}).get("color", "#888888") for l in prob_labels]
-        fig_prob = go.Figure(go.Bar(
-            x=prob_vals, y=prob_labels, orientation="h",
-            marker_color=bar_colors,
-            text=[f"{v:.1f}%" for v in prob_vals],
-            textposition="auto",
-        ))
-        fig_prob.update_layout(
-            height=110,
-            margin=dict(t=4, b=4, l=4, r=4),
-            xaxis=dict(range=[0, 100], visible=False),
-            yaxis=dict(title=None, tickfont_size=11),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-        )
-        st.caption("**유형별 소속 확률** (거리 역수 softmax 정규화)")
-        st.plotly_chart(fig_prob, use_container_width=True)
+        with top_l:
+            # 유형명
+            st.markdown(
+                f"""<div style="background:{color}18;border-left:5px solid {color};
+                        padding:14px 18px;border-radius:8px;margin-bottom:12px;">
+                    <span style="font-size:1.5rem;font-weight:700;color:{color};">
+                        {emoji} {label}
+                    </span>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+            # 유형별 소속 확률
+            cluster_probs = result.get("cluster_probs", {label: conf / 100})
+            prob_labels = list(cluster_probs.keys())
+            prob_vals   = [v * 100 for v in cluster_probs.values()]
+            bar_colors  = [CLUSTER_STATS.get(l, {}).get("color", "#888888") for l in prob_labels]
+            fig_prob = go.Figure(go.Bar(
+                x=prob_vals, y=prob_labels, orientation="h",
+                marker_color=bar_colors,
+                text=[f"{v:.1f}%" for v in prob_vals],
+                textposition="auto",
+            ))
+            fig_prob.update_layout(
+                height=110,
+                margin=dict(t=4, b=4, l=4, r=4),
+                xaxis=dict(range=[0, 100], visible=False),
+                yaxis=dict(title=None, tickfont_size=11),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+            st.caption("유형별 소속 확률")
+            st.plotly_chart(fig_prob, use_container_width=True)
 
-        left, right = st.columns([1, 1])
-
-        # 입력 증상 프로파일 레이더
-        with left:
+        with top_r:
             cats   = ["콧물", "코막힘", "재채기", "눈 증상"]
             values = [s_rhinorrhea * 10, s_congestion * 10, s_sneezing * 10, s_ocular * 10]
             fig_radar = go.Figure(go.Scatterpolar(
@@ -457,7 +450,6 @@ with tab1:
                 line=dict(color=color, width=2),
                 name="내 증상",
             ))
-            # 유형 대표 프로파일 오버레이
             profile = stat.get("symptom_profile", {})
             if profile:
                 pv = [profile.get(c, 0) * 10 for c in cats]
@@ -471,28 +463,15 @@ with tab1:
                 ))
             fig_radar.update_layout(
                 polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                showlegend=True, height=240,
+                showlegend=True, height=280,
                 margin=dict(t=20, b=20, l=40, r=40),
                 legend=dict(orientation="h", y=-0.1),
             )
             st.plotly_chart(fig_radar, use_container_width=True)
 
-        # 맞춤 가이드
-        st.markdown("#### 📋 맞춤 관리 가이드")
-        for i, tip in enumerate(result["guide"], 1):
-            st.markdown(
-                f"""
-                <div class="guide-item">
-                    <div class="guide-num" style="background:{color};">{i}</div>
-                    <span style="padding-top:3px;">{tip}</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        # ── 오늘의 위험수준 대시보드 ──────────────────────
+        # ── Row 2: 오늘의 위험수준 ───────────────────────
         st.divider()
-        st.markdown("#### 🚨 오늘의 위험수준 대시보드")
+        st.markdown("#### 🚨 오늘의 위험수준")
 
         total_score = s_rhinorrhea + s_congestion + s_sneezing + s_ocular
         sev_pct     = total_score / 40 * 100
@@ -507,10 +486,10 @@ with tab1:
 
         with dash_l:
             sym_items = [
-                ("콧물",   s_rhinorrhea, "#4A90D9"),
-                ("코막힘", s_congestion, "#E8784A"),
-                ("재채기", s_sneezing,   "#2ECC71"),
-                ("눈 증상", s_ocular,    "#7B68EE"),
+                ("콧물",    s_rhinorrhea, "#4A90D9"),
+                ("코막힘",  s_congestion, "#E8784A"),
+                ("재채기",  s_sneezing,   "#2ECC71"),
+                ("눈 증상", s_ocular,     "#7B68EE"),
             ]
             nz = [(l, v, c) for l, v, c in sym_items if v > 0]
             if nz:
@@ -539,7 +518,6 @@ with tab1:
             st.plotly_chart(fig_risk, use_container_width=True)
 
         with dash_r:
-            # 위험도 뱃지
             st.markdown(
                 f"""<div style="background:{sev_color}22;border-left:4px solid {sev_color};
                         padding:10px 14px;border-radius:6px;margin-bottom:10px;">
@@ -549,7 +527,6 @@ with tab1:
                     </div></div>""",
                 unsafe_allow_html=True,
             )
-            # 환경 지표
             pm10  = env.get("pm10")
             pm25  = env.get("pm25")
             humid = env.get("humidity")
@@ -558,15 +535,26 @@ with tab1:
                 if pm10  is not None: env_cols[0].metric("PM10",  f"{pm10:.0f}㎍")
                 if pm25  is not None: env_cols[1].metric("PM2.5", f"{pm25:.0f}㎍")
                 if humid is not None: env_cols[2].metric("습도",   f"{humid:.0f}%")
-            # 안내 메시지
             msgs = _risk_messages(label, s_rhinorrhea, s_congestion, s_sneezing, s_ocular, env)
             if msgs:
                 for mtype, mtext in msgs:
-                    if mtype == "error":   st.error(mtext)
+                    if mtype == "error":     st.error(mtext)
                     elif mtype == "warning": st.warning(mtext)
                     else:                    st.info(mtext)
             else:
                 st.success("오늘 증상이 경미하고 환경 조건도 양호합니다. 현재 관리 방법을 유지하세요.")
+
+        # ── Row 3: 맞춤 관리 가이드 ──────────────────────
+        st.divider()
+        st.markdown("#### 📋 맞춤 관리 가이드")
+        for i, tip in enumerate(result["guide"], 1):
+            st.markdown(
+                f"""<div class="guide-item">
+                    <div class="guide-num" style="background:{color};">{i}</div>
+                    <span style="padding-top:3px;">{tip}</span>
+                </div>""",
+                unsafe_allow_html=True,
+            )
 
         with st.expander("입력 정보 요약"):
             st.json(payload)
