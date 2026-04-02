@@ -137,15 +137,25 @@ def fetch_kma_forecast(nx: int = 60, ny: int = 127) -> pd.DataFrame:
         return cached
 
     now = datetime.now()
-    base_date = now.strftime("%Y%m%d")
-    # 기상청 예보 발표 시간 (02, 05, 08, 11, 14, 17, 20, 23)
-    base_time = "0500"
+    # 기상청 예보 발표 시간 (02, 05, 08, 11, 14, 17, 20, 23) — 발표 후 약 10분 지연
+    _ISSUE_HOURS = [2, 5, 8, 11, 14, 17, 20, 23]
+    cur_hour = now.hour - (1 if now.minute < 10 else 0)  # 발표 후 10분 여유
+    past = [h for h in _ISSUE_HOURS if h <= cur_hour]
+    if past:
+        base_date = now.strftime("%Y%m%d")
+        base_time = f"{past[-1]:02d}00"
+    else:
+        # 자정~02:10 사이 → 전날 23시 예보
+        from datetime import timedelta
+        prev = now - timedelta(days=1)
+        base_date = prev.strftime("%Y%m%d")
+        base_time = "2300"
 
     base_url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
     params = {
         "serviceKey": KMA_KEY,
         "pageNo": 1,
-        "numOfRows": 100,
+        "numOfRows": 300,
         "dataType": "JSON",
         "base_date": base_date,
         "base_time": base_time,
