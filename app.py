@@ -140,6 +140,50 @@ def _get_guide_info(label: str) -> dict | None:
     return None
 
 
+# ── VAS 척도 설명 ────────────────────────────────────
+_VAS = {
+    "rhinorrhea": [
+        (0,  0,  "콧물이 전혀 없음"),
+        (1,  2,  "코 안이 약간 촉촉한 느낌, 콧물이 거의 없음"),
+        (3,  4,  "콧물이 가끔 나와 휴지로 닦는 정도"),
+        (5,  6,  "콧물이 자주 흘러 휴지를 자주 사용함"),
+        (7,  8,  "콧물이 계속 흘러 업무·일상이 방해됨"),
+        (9,  10, "콧물이 멈추지 않아 휴지 없이 생활 불가"),
+    ],
+    "congestion": [
+        (0,  0,  "코막힘 전혀 없음, 코로 편하게 숨쉬기 가능"),
+        (1,  2,  "코가 약간 답답한 느낌이지만 숨쉬기는 괜찮음"),
+        (3,  4,  "코가 약간 답답하지만 입으로 숨 쉴 정도는 아님"),
+        (5,  6,  "코막힘이 심해 가끔 입으로 숨을 쉬게 됨"),
+        (7,  8,  "한쪽 코가 완전히 막혀서 입으로 숨을 쉬어야 함"),
+        (9,  10, "양쪽 코가 모두 막혀 수면·집중이 거의 불가능"),
+    ],
+    "sneezing": [
+        (0,  0,  "재채기·가려움 전혀 없음"),
+        (1,  2,  "하루 1~2번 가볍게 재채기하는 정도"),
+        (3,  4,  "하루 수 차례 재채기, 코·입천장이 가끔 간지러움"),
+        (5,  6,  "재채기가 연속으로 나오고 코·목이 자주 가려움"),
+        (7,  8,  "발작성 재채기가 멈추지 않고 가려움이 매우 심함"),
+        (9,  10, "재채기·가려움으로 일상·수면이 불가능한 수준"),
+    ],
+    "ocular": [
+        (0,  0,  "눈 증상 전혀 없음"),
+        (1,  2,  "눈이 가끔 약간 뻑뻑하거나 피로한 느낌"),
+        (3,  4,  "눈이 가끔 가렵거나 약간 충혈됨"),
+        (5,  6,  "눈이 충혈되고 가려워서 자꾸 손이 감"),
+        (7,  8,  "눈이 매우 가렵고 충혈·부종이 심해 일상이 불편"),
+        (9,  10, "눈을 뜨기 힘들 정도로 가렵고 충혈·눈물이 심함"),
+    ],
+}
+
+def _vas_label(symptom: str, score: int) -> str:
+    """현재 점수에 해당하는 VAS 설명 반환."""
+    for lo, hi, text in _VAS[symptom]:
+        if lo <= score <= hi:
+            return text
+    return ""
+
+
 # ── PM 등급 ───────────────────────────────────────────
 def _pm10_grade(val: float) -> tuple[str, str]:
     if val <= 30:  return "좋음",    "#4CAF50"
@@ -173,9 +217,13 @@ with st.sidebar:
 
     st.markdown("### 📋 현재 증상 (0~10점)")
     s_rhinorrhea = st.slider("💧 콧물",        0, 10, 5)
+    st.caption(f"**{s_rhinorrhea}점** — {_vas_label('rhinorrhea', s_rhinorrhea)}")
     s_congestion = st.slider("👃 코막힘",       0, 10, 3)
+    st.caption(f"**{s_congestion}점** — {_vas_label('congestion', s_congestion)}")
     s_sneezing   = st.slider("😤 재채기·가려움", 0, 10, 5)
+    st.caption(f"**{s_sneezing}점** — {_vas_label('sneezing', s_sneezing)}")
     s_ocular     = st.slider("👁 눈 증상",      0, 10, 2)
+    st.caption(f"**{s_ocular}점** — {_vas_label('ocular', s_ocular)}")
 
     st.divider()
     st.markdown("### 🏥 동반 질환 (선택)")
