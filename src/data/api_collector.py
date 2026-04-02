@@ -88,6 +88,12 @@ def fetch_airkorea(station_name: str = "종로구", date_str: str | None = None)
     resp.raise_for_status()
     items = resp.json()["response"]["body"]["items"]
 
+    if not items:
+        raise ValueError(
+            f"'{station_name}' 측정소 데이터가 없습니다. "
+            "측정소명이 정확한지 확인하세요 (예: '종로구', '인계동')."
+        )
+
     records = []
     for item in items:
         records.append({
