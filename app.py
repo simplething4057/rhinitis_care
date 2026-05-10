@@ -1048,7 +1048,14 @@ with tab4:
                             st.caption(f"측정 지역: {sido}  |  기준일: {row.get('dataTime', '-')}  |  캐시 TTL: 60분")
 
                 except Exception as e:
-                    st.error(f"꽃가루 정보를 불러오지 못했습니다: {e}")
+                    from src.data.api_collector import PollenAPIUnavailableError
+                    if isinstance(e, PollenAPIUnavailableError):
+                        st.info(
+                            "🌸 꽃가루 정보를 제공하려면 **별도 API 구독**이 필요합니다.  \n"
+                            "data.go.kr → **꽃가루농도위험지수(PollenRiskIdxInqireSvc)** 검색 후 활용신청"
+                        )
+                    else:
+                        st.error(f"꽃가루 정보를 불러오지 못했습니다: {e}")
 
         st.divider()
 

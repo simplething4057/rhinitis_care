@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 AIRKOREA_KEY = os.getenv("AIRKOREA_API_KEY", "")
 KMA_KEY = os.getenv("KMA_API_KEY", "")
+POLLEN_KEY = os.getenv("POLLEN_API_KEY") or AIRKOREA_KEY  # 꽃가루 전용 키 없으면 에어코리아 키로 폴백
 
 # ──────────────────────────────────────────────
 # 간단한 TTL 인메모리 캐시
@@ -211,16 +212,23 @@ POLLEN_GRADE_MAP: dict[int, tuple[str, str]] = {
 }
 
 
+class PollenAPIUnavailableError(Exception):
+    """꽃가루 API 서비스 미구독 또는 서버 오류."""
+
+
 def fetch_pollen(sido: str = "서울") -> pd.DataFrame:
     """
     에어코리아 꽃가루 위험지수 수집.
     sido: 시도명 (예: '서울', '경기', '부산')
-    반환: columns = ['sido', 'dataTime', 꽃가루명...], 등급 값 1~4 (없으면 NaN)
+    반환: columns = ['sido', 'dataTime', 꽃가루명...], 등급 값 1~4
 
     결과는 TTL 60분 인메모리 캐시에 보관됩니다.
+
+    ※ 이 API는 data.go.kr에서 'PollenRiskIdxInqireSvc' 서비스를
+      별도 구독해야 이용 가능합니다 (ArpltnInforInqireSvc와 다른 서비스).
     """
-    if not AIRKOREA_KEY:
-        raise EnvironmentError("AIRKOREA_API_KEY 환경변수가 설정되지 않았습니다.")
+    if not POLLEN_KEY:
+        raise EnvironmentError("POLLEN_API_KEY (또는 AIRKOREA_API_KEY) 환경변수가 설정되지 않았습니다.")
 
     cache_key = f"pollen:{sido}"
     cached = _cache_get(cache_key)
@@ -228,30 +236,44 @@ def fetch_pollen(sido: str = "서울") -> pd.DataFrame:
         return cached
 
     today = datetime.now().strftime("%Y%m%d")
-    base_url = "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getPollenRiskIdxSttnList"
+    # 꽃가루 서비스는 ArpltnInforInqireSvc 와 다른 별도 서비스 ID
+    base_url = "http://apis.data.go.kr/B552584/PollenRiskIdxInqireSvc/getPollenRiskIdxSidoLst"
     params = {
-        "serviceKey": AIRKOREA_KEY,
+        "serviceKey": POLLEN_KEY,
         "returnType": "json",
-        "numOfRows": 5,
+        "numOfRows": 20,
         "pageNo": 1,
-        "stationName": sido,
         "searchDate": today,
     }
 
     resp = requests.get(base_url, params=params, timeout=10)
+
+    # 500 = API 키가 이 서비스에 미구독 (data.go.kr에서 PollenRiskIdxInqireSvc 별도 신청 필요)
+    if resp.status_code == 500:
+        raise PollenAPIUnavailableError(
+            "꽃가루 API 미구독 상태입니다. "
+            "data.go.kr에서 '꽃가루농도위험지수(PollenRiskIdxInqireSvc)' 서비스를 "
+            "별도로 신청한 뒤 API 키를 발급받아야 합니다."
+        )
     resp.raise_for_status()
+
     body = resp.json()["response"]["body"]
     items = body.get("items") or []
     if isinstance(items, dict):
         items = items.get("item", [])
-    if not items:
+
+    # sido 필터링 (전국 데이터 중 해당 시도만 추출)
+    target = next(
+        (it for it in items if sido in str(it.get("sidoName", ""))),
+        items[0] if items else None,
+    )
+    if not target:
         logger.warning(f"꽃가루 데이터 없음 (sido={sido}, date={today})")
         return pd.DataFrame()
 
-    item = items[0] if isinstance(items, list) else items
-    row: dict = {"sido": sido, "dataTime": item.get("dataTime", today)}
+    row: dict = {"sido": sido, "dataTime": target.get("dataTime", today)}
     for key, name in {**POLLEN_TREE_KEYS, **POLLEN_WEED_KEYS}.items():
-        raw = item.get(key)
+        raw = target.get(key)
         try:
             row[name] = int(raw)
         except (TypeError, ValueError):
