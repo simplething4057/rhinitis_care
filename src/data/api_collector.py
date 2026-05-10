@@ -189,19 +189,49 @@ def fetch_kma_forecast(nx: int = 60, ny: int = 127) -> pd.DataFrame:
 
 
 # ──────────────────────────────────────────────
-# 꽃가루 위험지수 수집
+# 꽃가루 위험지수 수집 (기상청 HealthWthrIdxServiceV3)
 # ──────────────────────────────────────────────
 
-# 에어코리아 꽃가루 API 수목·잡초 필드 → 한국어 이름
+# 기상청 꽃가루 V3 API 설정
+_KMA_POLLEN_BASE = "https://apis.data.go.kr/1360000/HealthWthrIdxServiceV3"
+
+# 시도명 → 10자리 행정구역코드
+_KMA_POLLEN_AREA: dict[str, str] = {
+    "서울": "1100000000",
+    "부산": "2600000000",
+    "대구": "2700000000",
+    "인천": "2800000000",
+    "광주": "2900000000",
+    "대전": "3000000000",
+    "울산": "3100000000",
+    "세종": "3611000000",
+    "경기": "4100000000",
+    "강원": "5100000000",
+    "충북": "4300000000",
+    "충남": "4400000000",
+    "전북": "4500000000",
+    "전남": "4600000000",
+    "경북": "4700000000",
+    "경남": "4800000000",
+    "제주": "5000000000",
+}
+
+# 꽃가루 종류 → API 오퍼레이션명
+_KMA_POLLEN_OPS: dict[str, str] = {
+    "소나무": "getPinePollenRiskIdxV3",
+    "참나무": "getOakPollenRiskIdxV3",
+    "자작나무": "getBirchPollenRiskIdxV3",
+    "쑥":    "getWeedPollenRiskIdxV3",
+}
+
+# 수목·잡초 꽃가루 분류 (app.py 호환)
 POLLEN_TREE_KEYS: dict[str, str] = {
-    "treeGrade1": "오리나무",
-    "treeGrade2": "참나무",
-    "treeGrade3": "소나무",
-    "treeGrade7": "자작나무",
+    "소나무": "소나무",
+    "참나무": "참나무",
+    "자작나무": "자작나무",
 }
 POLLEN_WEED_KEYS: dict[str, str] = {
-    "weedGrade1": "쑥",
-    "weedGrade2": "돼지풀",
+    "쑥": "쑥",
 }
 # 등급 → (레이블, 색상)
 POLLEN_GRADE_MAP: dict[int, tuple[str, str]] = {
@@ -218,14 +248,11 @@ class PollenAPIUnavailableError(Exception):
 
 def fetch_pollen(sido: str = "서울") -> pd.DataFrame:
     """
-    에어코리아 꽃가루 위험지수 수집.
+    기상청 꽃가루농도위험지수(3.0) 수집 — HealthWthrIdxServiceV3.
     sido: 시도명 (예: '서울', '경기', '부산')
-    반환: columns = ['sido', 'dataTime', 꽃가루명...], 등급 값 1~4
+    반환: columns = ['sido', 'dataTime', '소나무', '참나무', '자작나무', '쑥'], 등급 1~4
 
     결과는 TTL 60분 인메모리 캐시에 보관됩니다.
-
-    ※ 이 API는 data.go.kr에서 'PollenRiskIdxInqireSvc' 서비스를
-      별도 구독해야 이용 가능합니다 (ArpltnInforInqireSvc와 다른 서비스).
     """
     if not POLLEN_KEY:
         raise EnvironmentError("POLLEN_API_KEY (또는 AIRKOREA_API_KEY) 환경변수가 설정되지 않았습니다.")
@@ -235,52 +262,47 @@ def fetch_pollen(sido: str = "서울") -> pd.DataFrame:
     if cached is not None:
         return cached
 
-    today = datetime.now().strftime("%Y%m%d")
-    # 꽃가루 서비스는 ArpltnInforInqireSvc 와 다른 별도 서비스 ID
-    base_url = "http://apis.data.go.kr/B552584/PollenRiskIdxInqireSvc/getPollenRiskIdxSidoLst"
-    params = {
-        "serviceKey": POLLEN_KEY,
-        "returnType": "json",
-        "numOfRows": 20,
-        "pageNo": 1,
-        "searchDate": today,
-    }
+    from datetime import timezone, timedelta as _td
+    _KST = timezone(_td(hours=9))
+    now = datetime.now(_KST).replace(tzinfo=None)
+    # 기상청 V3: time 파라미터 YYYYMMDDHH (06 또는 18)
+    hour = "06" if now.hour < 18 else "18"
+    time_str = now.strftime("%Y%m%d") + hour
 
-    resp = requests.get(base_url, params=params, timeout=10)
+    area_code = _KMA_POLLEN_AREA.get(sido, "1100000000")
+    row: dict = {"sido": sido, "dataTime": time_str}
 
-    # 500 = API 키가 이 서비스에 미구독 (data.go.kr에서 PollenRiskIdxInqireSvc 별도 신청 필요)
-    if resp.status_code == 500:
-        raise PollenAPIUnavailableError(
-            "꽃가루 API 미구독 상태입니다. "
-            "data.go.kr에서 '꽃가루농도위험지수(PollenRiskIdxInqireSvc)' 서비스를 "
-            "별도로 신청한 뒤 API 키를 발급받아야 합니다."
-        )
-    resp.raise_for_status()
-
-    body = resp.json()["response"]["body"]
-    items = body.get("items") or []
-    if isinstance(items, dict):
-        items = items.get("item", [])
-
-    # sido 필터링 (전국 데이터 중 해당 시도만 추출)
-    target = next(
-        (it for it in items if sido in str(it.get("sidoName", ""))),
-        items[0] if items else None,
-    )
-    if not target:
-        logger.warning(f"꽃가루 데이터 없음 (sido={sido}, date={today})")
-        return pd.DataFrame()
-
-    row: dict = {"sido": sido, "dataTime": target.get("dataTime", today)}
-    for key, name in {**POLLEN_TREE_KEYS, **POLLEN_WEED_KEYS}.items():
-        raw = target.get(key)
+    for pollen_name, operation in _KMA_POLLEN_OPS.items():
         try:
-            row[name] = int(raw)
-        except (TypeError, ValueError):
-            row[name] = None
+            resp = requests.get(
+                f"{_KMA_POLLEN_BASE}/{operation}",
+                params={
+                    "serviceKey": POLLEN_KEY,
+                    "pageNo": 1,
+                    "numOfRows": 10,
+                    "dataType": "JSON",
+                    "areaNo": area_code,
+                    "time": time_str,
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            body = resp.json()["response"]["body"]
+            items = body.get("items") or {}
+            item_list = items.get("item", []) if isinstance(items, dict) else (items or [])
+            if item_list:
+                item = item_list[0] if isinstance(item_list, list) else item_list
+                # h0 = 오늘 예측값 (등급 1~4)
+                grade = item.get("h0") or item.get("today") or item.get("value")
+                row[pollen_name] = _safe_float(grade)
+            else:
+                row[pollen_name] = None
+        except Exception as e:
+            logger.warning(f"꽃가루 {pollen_name} 수집 실패 ({operation}): {e}")
+            row[pollen_name] = None
 
     df = pd.DataFrame([row])
-    logger.info(f"꽃가루 수집 완료: {sido} ({today})")
+    logger.info(f"기상청 꽃가루 수집 완료: sido={sido}, time={time_str}")
     _cache_set(cache_key, df)
     return df
 

@@ -434,7 +434,7 @@ with st.sidebar:
     st.divider()
     predict_btn = st.button(
         "🔍 비염 유형 분석하기",
-        use_container_width=True,
+        width='stretch',
         type="primary",
     )
 
@@ -552,7 +552,7 @@ with tab1:
                 plot_bgcolor="rgba(0,0,0,0)",
                 paper_bgcolor="rgba(0,0,0,0)",
             )
-            st.plotly_chart(fig_prob, use_container_width=True)
+            st.plotly_chart(fig_prob, width='stretch')
 
         # ── Row 1: 유형 변화 추이 + 레이더 나란히 ─
         top_l, top_r = st.columns([1, 1])
@@ -594,7 +594,7 @@ with tab1:
                     height=260,
                     margin=dict(t=50, b=5, l=5, r=5),
                 )
-                st.plotly_chart(fig_trend, use_container_width=True)
+                st.plotly_chart(fig_trend, width='stretch')
             else:
                 st.info("데이터가 충분하지 않아 추이를 표시할 수 없습니다.")
 
@@ -626,7 +626,7 @@ with tab1:
                 margin=dict(t=20, b=20, l=40, r=40),
                 legend=dict(orientation="h", y=-0.1),
             )
-            st.plotly_chart(fig_radar, use_container_width=True)
+            st.plotly_chart(fig_radar, width='stretch')
 
         # ── Row Ex: 최근 7일 증상 점수 변화 ──────────────────
         st.markdown("#### 📈 최근 7일 증상 점수 추이")
@@ -714,7 +714,7 @@ with tab1:
                 ),
             )
             st.caption(f"실선: 내 증상  /  점선: {label} 평균")
-            st.plotly_chart(fig_scores, use_container_width=True)
+            st.plotly_chart(fig_scores, width='stretch')
 
             # 💡 인사이트 제공
             if len(recent_df) >= 2:
@@ -785,7 +785,7 @@ with tab1:
                     x=0.5, y=0.5, font_size=13, showarrow=False,
                 )],
             )
-            st.plotly_chart(fig_risk, use_container_width=True)
+            st.plotly_chart(fig_risk, width='stretch')
 
         with dash_r:
             st.markdown(
@@ -868,7 +868,7 @@ with tab2:
         )
         fig_pie.update_traces(textinfo="percent+label")
         fig_pie.update_layout(height=360, margin=dict(t=50, b=10))
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, width='stretch')
 
     with col_b:
         st.markdown("#### 유형별 대표 증상 프로파일")
@@ -877,7 +877,7 @@ with tab2:
             row = {"유형": f"{stat['emoji']} {lbl}"}
             row.update({k: f"{v}/10" for k, v in stat["symptom_profile"].items()})
             profile_data.append(row)
-        st.dataframe(pd.DataFrame(profile_data), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(profile_data), width='stretch', hide_index=True)
 
     st.markdown("### 🔬 유형별 증상 강도 비교")
     compare_rows = []
@@ -896,7 +896,7 @@ with tab2:
         title="유형별 증상 강도 (0~10)",
     )
     fig_bar.update_layout(height=360, margin=dict(t=50, b=10), yaxis_range=[0, 10])
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_bar, width='stretch')
 
 
 # ────────────────────────────────────────────────────
@@ -986,7 +986,7 @@ with tab4:
                         fig_air.add_hline(y=80,  line_dash="dot", line_color="#FFC107", annotation_text="나쁨(80)")
                         fig_air.add_hline(y=150, line_dash="dot", line_color="#FF5722", annotation_text="매우나쁨(150)")
                         fig_air.update_layout(height=300, margin=dict(t=50, b=10))
-                        st.plotly_chart(fig_air, use_container_width=True)
+                        st.plotly_chart(fig_air, width='stretch')
 
                     st.caption(f"마지막 업데이트: {latest.get('datetime', '-')}  |  캐시 TTL: 60분")
 
@@ -1048,14 +1048,7 @@ with tab4:
                             st.caption(f"측정 지역: {sido}  |  기준일: {row.get('dataTime', '-')}  |  캐시 TTL: 60분")
 
                 except Exception as e:
-                    from src.data.api_collector import PollenAPIUnavailableError
-                    if isinstance(e, PollenAPIUnavailableError):
-                        st.info(
-                            "🌸 꽃가루 정보를 제공하려면 **별도 API 구독**이 필요합니다.  \n"
-                            "data.go.kr → **꽃가루농도위험지수(PollenRiskIdxInqireSvc)** 검색 후 활용신청"
-                        )
-                    else:
-                        st.error(f"꽃가루 정보를 불러오지 못했습니다: {e}")
+                    st.error(f"꽃가루 정보를 불러오지 못했습니다: {e}")
 
         st.divider()
 
@@ -1115,7 +1108,7 @@ with tab4:
                             labels={"temperature": "기온 (°C)", "_dt": "시각"},
                         )
                         fig_wx.update_layout(height=300, margin=dict(t=50, b=10))
-                        st.plotly_chart(fig_wx, use_container_width=True)
+                        st.plotly_chart(fig_wx, width='stretch')
 
                 except Exception as e:
                     st.error(f"날씨 정보를 불러오지 못했습니다: {e}")
