@@ -38,7 +38,8 @@ def save_history(record: dict, user_id: str):
         db.refresh(new_record)
     except Exception as e:
         db.rollback()
-        raise RuntimeError(f"이력 저장 실패: {e}") from e
+        print(f"⚠️ 이력 저장 실패: {e}")
+        raise  # 원본 예외를 그대로 전파 (메시지 중복 방지)
     finally:
         db.close()
 

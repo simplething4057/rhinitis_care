@@ -1,6 +1,6 @@
 """
 공공데이터 API 수집 모듈
-- 에어코리아: 미세먼지(PM10, PM2.5) 실시간 수집
+- 에어코리아: 미세먼지(PM10, PM2.5), 꽃가루 위험지수 실시간 수집
 - 기상청: 기온, 습도 수집
 
 캐싱 정책:
@@ -183,6 +183,82 @@ def fetch_kma_forecast(nx: int = 60, ny: int = 127) -> pd.DataFrame:
 
     df = pd.DataFrame(list(records.values()))
     logger.info(f"기상청 예보 수집 완료: {len(df)}건")
+    _cache_set(cache_key, df)
+    return df
+
+
+# ──────────────────────────────────────────────
+# 꽃가루 위험지수 수집
+# ──────────────────────────────────────────────
+
+# 에어코리아 꽃가루 API 수목·잡초 필드 → 한국어 이름
+POLLEN_TREE_KEYS: dict[str, str] = {
+    "treeGrade1": "오리나무",
+    "treeGrade2": "참나무",
+    "treeGrade3": "소나무",
+    "treeGrade7": "자작나무",
+}
+POLLEN_WEED_KEYS: dict[str, str] = {
+    "weedGrade1": "쑥",
+    "weedGrade2": "돼지풀",
+}
+# 등급 → (레이블, 색상)
+POLLEN_GRADE_MAP: dict[int, tuple[str, str]] = {
+    1: ("낮음",    "#4CAF50"),
+    2: ("보통",    "#FFC107"),
+    3: ("높음",    "#FF5722"),
+    4: ("매우높음", "#B71C1C"),
+}
+
+
+def fetch_pollen(sido: str = "서울") -> pd.DataFrame:
+    """
+    에어코리아 꽃가루 위험지수 수집.
+    sido: 시도명 (예: '서울', '경기', '부산')
+    반환: columns = ['sido', 'dataTime', 꽃가루명...], 등급 값 1~4 (없으면 NaN)
+
+    결과는 TTL 60분 인메모리 캐시에 보관됩니다.
+    """
+    if not AIRKOREA_KEY:
+        raise EnvironmentError("AIRKOREA_API_KEY 환경변수가 설정되지 않았습니다.")
+
+    cache_key = f"pollen:{sido}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    today = datetime.now().strftime("%Y%m%d")
+    base_url = "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getPollenRiskIdxSttnList"
+    params = {
+        "serviceKey": AIRKOREA_KEY,
+        "returnType": "json",
+        "numOfRows": 5,
+        "pageNo": 1,
+        "stationName": sido,
+        "searchDate": today,
+    }
+
+    resp = requests.get(base_url, params=params, timeout=10)
+    resp.raise_for_status()
+    body = resp.json()["response"]["body"]
+    items = body.get("items") or []
+    if isinstance(items, dict):
+        items = items.get("item", [])
+    if not items:
+        logger.warning(f"꽃가루 데이터 없음 (sido={sido}, date={today})")
+        return pd.DataFrame()
+
+    item = items[0] if isinstance(items, list) else items
+    row: dict = {"sido": sido, "dataTime": item.get("dataTime", today)}
+    for key, name in {**POLLEN_TREE_KEYS, **POLLEN_WEED_KEYS}.items():
+        raw = item.get(key)
+        try:
+            row[name] = int(raw)
+        except (TypeError, ValueError):
+            row[name] = None
+
+    df = pd.DataFrame([row])
+    logger.info(f"꽃가루 수집 완료: {sido} ({today})")
     _cache_set(cache_key, df)
     return df
 

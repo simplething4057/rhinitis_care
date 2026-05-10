@@ -20,11 +20,14 @@ if SQLALCHEMY_DATABASE_URL:
             connect_args=_connect_args,
             poolclass=NullPool,
         )
+        # 실제 연결 테스트 (create_engine은 lazy — 연결을 시도하지 않음)
+        with engine.connect() as _conn:
+            _conn.execute(text("SELECT 1"))
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     except Exception as e:
         engine       = None
         SessionLocal = None
-        print(f"⚠️ SQLAlchemy 연결 실패: {e}")
+        print(f"⚠️ DB 연결 실패: {e}")
 else:
     print("⚠️ DATABASE_URL 미설정 — 이력 저장 비활성화")
 

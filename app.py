@@ -51,18 +51,44 @@ def _get_api_url() -> str:
 API_URL = _get_api_url()
 
 # ── 측정 지역 ────────────────────────────────────────
+# (에어코리아 측정소명, KMA nx, KMA ny)
+# ✅ 대기+날씨 모두 가능 | ⚠️ 날씨만 가능 (에어코리아 측정소명 불일치)
 STATIONS = {
-    "서울 종로구":   ("종로구",  60, 127),
-    "서울 강남구":   ("강남구",  61, 126),
-    "서울 마포구":   ("마포구",  59, 127),
-    "서울 노원구":   ("노원구",  61, 129),
-    "서울 관악구":   ("관악구",  59, 125),
-    "인천":          ("인천",    55, 124),
-    "수원 (인계동)": ("인계동",  60, 121),
-    "파주":          ("파주",    56, 131),
-    "대전":          ("대전",    67, 100),
-    "대구":          ("대구",    89,  90),
-    "부산":          ("부산",    98,  76),
+    # ── 서울 (25개 구 전체 — 에어코리아 실측 확인) ──────
+    "서울 종로구":   ("종로구",   60, 127),
+    "서울 중구":     ("중구",     60, 127),
+    "서울 용산구":   ("용산구",   60, 126),
+    "서울 성동구":   ("성동구",   61, 127),
+    "서울 광진구":   ("광진구",   62, 127),
+    "서울 동대문구": ("동대문구", 61, 127),
+    "서울 중랑구":   ("중랑구",   62, 128),
+    "서울 성북구":   ("성북구",   61, 128),
+    "서울 강북구":   ("강북구",   61, 129),
+    "서울 도봉구":   ("도봉구",   61, 130),
+    "서울 노원구":   ("노원구",   61, 129),
+    "서울 은평구":   ("은평구",   59, 128),
+    "서울 서대문구": ("서대문구", 59, 127),
+    "서울 마포구":   ("마포구",   59, 127),
+    "서울 양천구":   ("양천구",   58, 126),
+    "서울 강서구":   ("강서구",   57, 126),
+    "서울 구로구":   ("구로구",   58, 125),
+    "서울 금천구":   ("금천구",   59, 124),
+    "서울 영등포구": ("영등포구", 58, 126),
+    "서울 동작구":   ("동작구",   59, 125),
+    "서울 관악구":   ("관악구",   59, 125),
+    "서울 서초구":   ("서초구",   61, 125),
+    "서울 강남구":   ("강남구",   61, 126),
+    "서울 송파구":   ("송파구",   62, 126),
+    "서울 강동구":   ("강동구",   62, 126),
+    # ── 경기·세종 ────────────────────────────────────────
+    "수원 (인계동)": ("인계동",   60, 121),
+    "파주":          ("파주",     56, 131),
+    "세종 (아름동)": ("아름동",   66, 103),
+    # ── 광역시 (⚠️ 날씨 정보만 제공 — 에어코리아 미지원) ─
+    "인천 ⚠️":       ("인천",     55, 124),
+    "대전 ⚠️":       ("대전",     67, 100),
+    "대구 ⚠️":       ("대구",     89,  90),
+    "부산 ⚠️":       ("부산",     98,  76),
 }
 
 # ── 클러스터 메타 (동반질환 기반 3유형 — step3/predictor.py 일치) ──
@@ -215,6 +241,13 @@ def _pm25_grade(val: float) -> tuple[str, str]:
     if val <= 75:  return "나쁨",    "#FF5722"
     return "매우나쁨", "#B71C1C"
 
+def _o3_grade(val: float) -> tuple[str, str]:
+    """O3 등급 (대기오염 예보 기준 ppm)"""
+    if val <= 0.030: return "좋음",    "#4CAF50"
+    if val <= 0.090: return "보통",    "#FFC107"
+    if val <= 0.150: return "나쁨",    "#FF5722"
+    return "매우나쁨", "#B71C1C"
+
 
 has_air_key     = bool(os.getenv("AIRKOREA_API_KEY"))
 has_weather_key = bool(os.getenv("KMA_API_KEY"))
@@ -230,6 +263,31 @@ def _fetch_air(station: str):
 def _fetch_weather(nx: int, ny: int):
     from src.data.api_collector import fetch_kma_forecast
     return fetch_kma_forecast(nx=nx, ny=ny)
+
+
+# 측정소명 → 시도명 (꽃가루 API 쿼리용)
+_POLLEN_SIDO: dict[str, str] = {
+    # 서울 전 구
+    "종로구": "서울", "중구":     "서울", "용산구":   "서울",
+    "성동구": "서울", "광진구":   "서울", "동대문구": "서울",
+    "중랑구": "서울", "성북구":   "서울", "강북구":   "서울",
+    "도봉구": "서울", "노원구":   "서울", "은평구":   "서울",
+    "서대문구": "서울", "마포구": "서울", "양천구":   "서울",
+    "강서구": "서울", "구로구":   "서울", "금천구":   "서울",
+    "영등포구": "서울", "동작구": "서울", "관악구":   "서울",
+    "서초구": "서울", "강남구":   "서울", "송파구":   "서울",
+    "강동구": "서울",
+    # 경기·세종
+    "인계동": "경기", "파주": "경기", "아름동": "세종",
+    # 광역시
+    "인천": "인천", "대전": "대전", "대구": "대구", "부산": "부산",
+}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_pollen(sido: str):
+    from src.data.api_collector import fetch_pollen
+    return fetch_pollen(sido=sido)
 
 
 def _get_current_env(station_name: str, nx: int, ny: int) -> dict:
@@ -430,7 +488,8 @@ with tab1:
             try:
                 save_history(record, user_nickname)
             except Exception as _e:
-                st.warning(f"⚠️ 이력 저장 실패: {_e}")
+                cause = _e.__cause__ or _e
+                st.warning(f"⚠️ 이력 저장 실패 (DB 연결 문제일 수 있습니다): {cause}")
 
         label      = result["cluster_label"]
         conf       = result["confidence"] * 100
@@ -894,16 +953,27 @@ with tab4:
                     o3_val   = latest.get("o3",   0) or 0
                     pm10_grade, _ = _pm10_grade(pm10_val)
                     pm25_grade, _ = _pm25_grade(pm25_val)
+                    o3_grade,   _ = _o3_grade(o3_val)
+
+                    # 오존 경보 (주의보 0.12 / 경보 0.30 / 중대경보 0.50 ppm)
+                    if o3_val >= 0.50:
+                        st.error(f"🚨 오존 **중대경보** ({o3_val:.3f} ppm) — 모든 실외 활동을 즉시 중단하고 실내로 이동하세요.")
+                    elif o3_val >= 0.30:
+                        st.error(f"⚠️ 오존 **경보** ({o3_val:.3f} ppm) — 노약자·호흡기 질환자는 외출을 금지하세요.")
+                    elif o3_val >= 0.12:
+                        st.warning(f"오존 **주의보** ({o3_val:.3f} ppm) — 장시간 야외 활동을 자제하세요.")
+                    elif o3_val > 0.090:
+                        st.warning(f"오존 농도 **나쁨** ({o3_val:.3f} ppm) — 민감군은 야외 활동에 주의하세요.")
 
                     if pm10_val > 80 or pm25_val > 35:
-                        st.error("⚠️ 현재 대기 상태가 **나쁨** 수준입니다. 외출 시 KF80 이상 마스크를 착용하세요.")
+                        st.error("⚠️ 미세먼지 **나쁨** 수준입니다. 외출 시 KF80 이상 마스크를 착용하세요.")
                     elif pm10_val > 30 or pm25_val > 15:
-                        st.warning("현재 대기 상태가 **보통** 수준입니다. 민감군은 주의하세요.")
+                        st.warning("미세먼지 **보통** 수준입니다. 민감군은 주의하세요.")
 
                     c1, c2, c3 = st.columns(3)
                     c1.metric("PM10 (미세먼지)",    f"{pm10_val:.0f} ㎍/㎥", delta=pm10_grade, delta_color="off")
                     c2.metric("PM2.5 (초미세먼지)", f"{pm25_val:.0f} ㎍/㎥", delta=pm25_grade, delta_color="off")
-                    c3.metric("O3 (오존)",          f"{o3_val:.3f} ppm")
+                    c3.metric("O3 (오존)",          f"{o3_val:.3f} ppm",     delta=o3_grade,  delta_color="off")
 
                     chart_df = air_df.dropna(subset=["pm10"]).tail(24).copy()
                     if not chart_df.empty:
@@ -922,6 +992,63 @@ with tab4:
 
                 except Exception as e:
                     st.error(f"대기 정보를 불러오지 못했습니다: {e}")
+
+        st.divider()
+
+        # ── 꽃가루 위험지수 ─────────────────────────────
+        st.markdown("### 🌸 꽃가루 위험지수")
+
+        if not has_air_key:
+            st.caption("에어코리아 API 키 미설정 — 꽃가루 정보를 불러올 수 없습니다.")
+        else:
+            sido = _POLLEN_SIDO.get(station_name, "서울")
+            with st.spinner("꽃가루 정보 불러오는 중..."):
+                try:
+                    from src.data.api_collector import POLLEN_GRADE_MAP, POLLEN_TREE_KEYS, POLLEN_WEED_KEYS
+                    pollen_df = _fetch_pollen(sido)
+
+                    if pollen_df.empty:
+                        st.caption("오늘자 꽃가루 데이터가 없습니다. (비수기이거나 측정소 미제공)")
+                    else:
+                        row = pollen_df.iloc[0]
+                        all_pollen_names = list(POLLEN_TREE_KEYS.values()) + list(POLLEN_WEED_KEYS.values())
+                        available = {name: int(row[name]) for name in all_pollen_names
+                                     if name in row and row[name] is not None and str(row[name]) != "nan"}
+
+                        if not available:
+                            st.caption("오늘자 꽃가루 데이터가 없습니다.")
+                        else:
+                            # 최고 위험 등급 경보
+                            max_grade = max(available.values())
+                            max_name  = max(available, key=lambda k: available[k])
+                            if max_grade >= 4:
+                                st.error(f"🚨 **{max_name}** 꽃가루 **매우높음** — 외출 시 마스크 착용 필수, 귀가 후 세안·세척하세요.")
+                            elif max_grade >= 3:
+                                st.warning(f"⚠️ **{max_name}** 꽃가루 **높음** — 비염 환자는 외출을 자제하고 창문을 닫으세요.")
+
+                            # 수목 / 잡초 섹션으로 구분 표시
+                            tree_names = list(POLLEN_TREE_KEYS.values())
+                            weed_names = list(POLLEN_WEED_KEYS.values())
+
+                            def _pollen_cols(names: list[str]):
+                                cols = st.columns(len(names))
+                                for col, name in zip(cols, names):
+                                    grade = available.get(name)
+                                    if grade:
+                                        label, _ = POLLEN_GRADE_MAP.get(grade, ("알 수 없음", "#888"))
+                                        col.metric(name, label, delta=f"등급 {grade}", delta_color="off")
+                                    else:
+                                        col.metric(name, "—")
+
+                            st.caption("🌳 수목 꽃가루")
+                            _pollen_cols(tree_names)
+                            st.caption("🌿 잡초 꽃가루")
+                            _pollen_cols(weed_names)
+
+                            st.caption(f"측정 지역: {sido}  |  기준일: {row.get('dataTime', '-')}  |  캐시 TTL: 60분")
+
+                except Exception as e:
+                    st.error(f"꽃가루 정보를 불러오지 못했습니다: {e}")
 
         st.divider()
 
