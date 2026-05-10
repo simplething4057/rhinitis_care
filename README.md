@@ -18,6 +18,7 @@
 10. [Streamlit Cloud 배포](#streamlit-cloud-배포)
 11. [성공 지표](#성공-지표)
 12. [변경 이력](#변경-이력)
+13. [별첨](#별첨)
 
 ---
 
@@ -430,3 +431,11 @@ DATABASE_URL = "postgresql://postgres.[project-ref]:[password]@aws-0-ap-southeas
 - `src/database.py` 실제 DB 연결 검증(`SELECT 1`) 추가 — 프로젝트 일시정지 시 즉시 감지
 - `src/utils/history.py` 이중 오류 메시지 접두사 버그 수정
 - `src/analysis/rhinitis_patient_profile.py` Healthcare 병합 컬럼 불일치 수정 (`AGE_START_YEARS`, `GENDER_FACTOR`) 및 연령대 불일치 시 독립 분석 폴백 추가
+
+---
+
+## 별첨
+
+| 문서 | 설명 |
+|---|---|
+| [AI기반_비염_증상_예측_및_개인_맞춤형_케어 서비스_수행계획서.pdf](AI기반_비염_증상_예측_및_개인_맞춤형_케어 서비스_수행계획서.pdf) | 프로젝트 수행계획서 (PRD) |
